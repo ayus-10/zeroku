@@ -1,6 +1,6 @@
 # Project zeroku
 
-One Paragraph of project description goes here
+Zeroku is a self-hosted platform for deploying applications on AWS.
 
 ## Getting Started
 
