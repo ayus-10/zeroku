@@ -6,11 +6,17 @@ import (
 	"net/http"
 )
 
+type flushWriter struct {
+	w  http.ResponseWriter
+	rc *http.ResponseController
+}
+
 func (s *Server) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
 
 	// Register routes
 	mux.HandleFunc("/", s.HelloWorldHandler)
+	mux.HandleFunc("POST /v1/apps/{name}/deploy", s.DeployHandler)
 
 	// Wrap the mux with CORS middleware
 	return s.corsMiddleware(mux)
@@ -34,6 +40,23 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+func newFlushWriter(w http.ResponseWriter) *flushWriter {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Accel-Buffering", "no")
+	return &flushWriter{
+		w:  w,
+		rc: http.NewResponseController(w),
+	}
+}
+
+func (f *flushWriter) Write(p []byte) (int, error) {
+	n, err := f.w.Write(p)
+	_ = f.rc.Flush()
+	return n, err
+}
+
+func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {}
 
 func (s *Server) HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]string{"message": "Hello World"}
