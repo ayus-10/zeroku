@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"zeroku/internal/server"
+	"github.com/ayus-10/zeroku/internal/server"
 )
 
 func gracefulShutdown(apiServer *http.Server, done chan bool) {

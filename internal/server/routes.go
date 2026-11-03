@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"zeroku/internal/deployer"
+	"github.com/ayus-10/zeroku/internal/deployer"
 )
 
 type DeployRequest struct {
