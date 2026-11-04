@@ -45,7 +45,11 @@ func initCmd(args []string) error {
 	region := fs.String("region", "ap-southeast-2", "AWS region")
 	fs.Parse(args)
 
-	if _, err := cli.Load(); err != nil {
+	ok, err := cli.Exists()
+	if err != nil {
+		return err
+	}
+	if ok {
 		return errors.New("already initialized: run `zeroku destroy` first")
 	}
 
@@ -65,7 +69,7 @@ func initCmd(args []string) error {
 		return err
 	}
 
-	res, err := infra.Init(ctx, dir);
+	res, err := infra.Init(ctx, dir)
 	if err != nil {
 		return err
 	}
