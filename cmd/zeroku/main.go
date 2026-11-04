@@ -1,4 +1,4 @@
-package zeroku
+package main
 
 import (
 	"context"
