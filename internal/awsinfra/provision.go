@@ -3,6 +3,7 @@ package awsinfra
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,16 @@ type Infra struct {
 	EC2    *ec2.Client
 	SSM    *ssm.Client
 	Region string
+}
+
+type Resources struct {
+	Region       string `json:"region"`
+	KeyName      string `json:"key_name"`
+	PemPath      string `json:"pem_path"`
+	SGID         string `json:"sg_id"`
+	InstanceID   string `json:"instance_id"`
+	AllocationID string `json:"allocation_id,omitempty"`
+	PublicIP     string `json:"public_ip,omitempty"`
 }
 
 func New(ctx context.Context, region string) (*Infra, error) {
@@ -146,34 +157,38 @@ func tcpIngress(port int32, cidr, desc string) types.IpPermission {
 	}
 }
 
-func (i *Infra) Init(ctx context.Context, pemDir string) (string, error) {
-	// TODO: cleanup on error
+func (i *Infra) Init(ctx context.Context, pemDir string) (*Resources, error) {
+	res := &Resources{}
 
 	ami, err := i.latestAMI(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to get latest AMI: %w", err)
+		return nil, fmt.Errorf("failed to get latest AMI: %w", err)
 	}
 
 	vpcID, err := i.defaultVPC(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to get default VPC: %w", err)
+		return nil, fmt.Errorf("failed to get default VPC: %w", err)
 	}
 
 	ip, err := myPublicIP(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to get public IP: %w", err)
+		return nil, fmt.Errorf("failed to get public IP: %w", err)
 	}
 
 	keyName := "zeroku-" + i.Region
 	pemPath := filepath.Join(pemDir, keyName+".pem")
 	if err := i.createKeyPair(ctx, keyName, pemPath); err != nil {
-		return "", fmt.Errorf("failed to create key pair: %w", err)
+		return nil, fmt.Errorf("failed to create key pair: %w", err)
 	}
+	res.KeyName = keyName
+	res.PemPath = pemPath
 
 	sgID, err := i.createSecurityGroup(ctx, "zeroku-sg", vpcID, ip+"/32")
 	if err != nil {
-		return "", fmt.Errorf("failed to create security group: %w", err)
+		i.Destroy(ctx, res)
+		return nil, fmt.Errorf("failed to create security group: %w", err)
 	}
+	res.SGID = sgID
 
 	out, err := i.EC2.RunInstances(ctx, &ec2.RunInstancesInput{
 		ImageId:          aws.String(ami),
@@ -198,17 +213,14 @@ func (i *Infra) Init(ctx context.Context, pemDir string) (string, error) {
 	})
 
 	if err != nil {
-		return "", fmt.Errorf("failed to run instance: %w", err)
+		i.Destroy(ctx, res)
+		return nil, fmt.Errorf("run instance: %w", err)
 	}
-
 	if len(out.Instances) == 0 {
-		return "", fmt.Errorf("no instances were created")
+		i.Destroy(ctx, res)
+		return nil, errors.New("RunInstances returned no instances")
 	}
+	res.InstanceID = aws.ToString(out.Instances[0].InstanceId)
 
-	instanceID := aws.ToString(out.Instances[0].InstanceId)
-	if instanceID == "" {
-		return "", fmt.Errorf("instance ID is empty")
-	}
-
-	return instanceID, nil
+	return res, nil
 }

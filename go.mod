@@ -1,4 +1,4 @@
-module zeroku
+module github.com/ayus-10/zeroku
 
 go 1.27.3
 
