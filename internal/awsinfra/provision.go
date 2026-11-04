@@ -26,11 +26,13 @@ type Infra struct {
 }
 
 type Resources struct {
-	KeyName      string
-	PemPath      string
-	SGID         string
-	InstanceID   string
-	AllocationID string
+	Region       string `json:"region"`
+	KeyName      string `json:"key_name"`
+	PemPath      string `json:"pem_path"`
+	SGID         string `json:"sg_id"`
+	InstanceID   string `json:"instance_id"`
+	AllocationID string `json:"allocation_id,omitempty"`
+	PublicIP     string `json:"public_ip,omitempty"`
 }
 
 func New(ctx context.Context, region string) (*Infra, error) {
