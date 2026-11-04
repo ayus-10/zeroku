@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -99,4 +100,25 @@ func (s *Store) BeginRelease(name, repo string, containerPort int) (int, error) 
 		return nil
 	})
 	return id, err
+}
+
+func NewStore(path string) (*Store, error) {
+	s := &Store{path: path}
+
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		s.data = Data{Apps: map[string]*App{}}
+		return s, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(b, &s.data); err != nil {
+		return nil, fmt.Errorf("state file is invalid: %w", err)
+	}
+	if s.data.Apps == nil {
+		s.data.Apps = map[string]*App{}
+	}
+	return s, nil
 }

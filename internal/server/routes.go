@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+
 	"github.com/ayus-10/zeroku/internal/deployer"
 )
 
@@ -112,7 +113,13 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 
 	appName := r.PathValue("name")
 
-	image := fmt.Sprintf("zeroku/%s:%d-%s", appName, 1, commitID) // TODO: replace with releaseID
+	releaseID, err := s.store.BeginRelease(appName, req.Repo, req.ContainerPort)
+	if err != nil {
+		http.Error(w, "Failed to begin release: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	image := fmt.Sprintf("zeroku/%s:%d-%s", appName, releaseID, commitID)
 
 	if err := deployer.Build(ctx, flushWriter, tempDir, image); err != nil {
 		http.Error(w, "Failed to build: "+err.Error(), http.StatusInternalServerError)
