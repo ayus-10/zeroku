@@ -10,6 +10,7 @@ import (
 
 	"github.com/ayus-10/zeroku/internal/awsinfra"
 	"github.com/ayus-10/zeroku/internal/cli"
+	"github.com/ayus-10/zeroku/internal/client"
 )
 
 func main() {
@@ -25,6 +26,8 @@ func main() {
 		err = initCmd(os.Args[2:])
 	case "destroy":
 		err = destroyCmd()
+	case "deploy":
+		err = deployCmd(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -99,4 +102,30 @@ func destroyCmd() error {
 
 	infra.Destroy(ctx, res)
 	return cli.Remove()
+}
+
+func deployCmd(args []string) error {
+	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
+
+	gitRef := fs.String("ref", "main", "Git branch, tag or commit")
+	port := fs.Int("port", 8080, "Container port")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	remaining := fs.Args()
+	if len(remaining) != 2 {
+		return fmt.Errorf("usage: zeroku deploy <appname> <giturl> [--ref main] [--port 1234]")
+	}
+
+	appName := remaining[0]
+	gitURL := remaining[1]
+
+	c := client.New("http://localhost:8080") // TODO: update this
+	if err := c.Deploy(appName, client.DeployRequest{Repo: gitURL, GitRef: *gitRef, ContainerPort: *port}); err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -7,14 +7,9 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/ayus-10/zeroku/internal/client"
 	"github.com/ayus-10/zeroku/internal/deployer"
 )
-
-type DeployRequest struct {
-	Repo          string `json:"repo"`
-	GitRef        string `json:"git_ref"`
-	ContainerPort int    `json:"container_port"`
-}
 
 type flushWriter struct {
 	w  http.ResponseWriter
@@ -25,8 +20,8 @@ func (s *Server) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
 
 	// Register routes
-	mux.HandleFunc("/", s.HelloWorldHandler)
 	mux.HandleFunc("POST /v1/apps/{name}/deploy", s.DeployHandler)
+	mux.HandleFunc("/", s.HelloWorldHandler)
 
 	// Wrap the mux with CORS middleware
 	return s.corsMiddleware(mux)
@@ -51,8 +46,8 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func parseDeployRequest(w http.ResponseWriter, r *http.Request) (DeployRequest, bool) {
-	var req DeployRequest
+func parseDeployRequest(w http.ResponseWriter, r *http.Request) (client.DeployRequest, bool) {
+	var req client.DeployRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
