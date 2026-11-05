@@ -69,3 +69,15 @@ func Remove() error {
 	}
 	return err
 }
+
+func Exists() (bool, error) {
+	p, err := configPath()
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return true, nil
+}
