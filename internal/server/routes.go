@@ -2,10 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
+	"regexp"
 
 	"github.com/ayus-10/zeroku/internal/client"
 	"github.com/ayus-10/zeroku/internal/deployer"
@@ -21,7 +22,6 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	// Register routes
 	mux.HandleFunc("POST /v1/apps/{name}/deploy", s.DeployHandler)
-	mux.HandleFunc("/", s.HelloWorldHandler)
 
 	// Wrap the mux with CORS middleware
 	return s.corsMiddleware(mux)
@@ -46,31 +46,44 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func parseDeployRequest(w http.ResponseWriter, r *http.Request) (client.DeployRequest, bool) {
+func parseDeployRequest(r *http.Request) (client.DeployRequest, error) {
 	var req client.DeployRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return req, false
+		return req, errors.New("invalid JSON body")
 	}
 
 	if req.Repo == "" {
-		http.Error(w, "repo is required", http.StatusBadRequest)
-		return req, false
+		return req, errors.New("repo is required")
 	}
 	if req.GitRef == "" {
 		req.GitRef = "main"
 	}
 	if req.ContainerPort < 1 || req.ContainerPort > 65535 {
-		http.Error(w, "container_port must be between 1 and 65535", http.StatusBadRequest)
-		return req, false
+		return req, errors.New("container_port must be between 1 and 65535")
 	}
 
-	return req, true
+	return req, nil
+}
+
+func validateAppName(name string) error {
+	var appNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+	if name == "" {
+		return errors.New("app name is required")
+	}
+	if len(name) > 63 {
+		return fmt.Errorf("app name must be 63 characters or fewer, got %d", len(name))
+	}
+	if !appNamePattern.MatchString(name) {
+		return errors.New("app name may contain letters, digits, and hyphens, but must not start or end with a hyphen")
+	}
+	return nil
 }
 
 func newFlushWriter(w http.ResponseWriter) *flushWriter {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	return &flushWriter{
 		w:  w,
@@ -84,54 +97,56 @@ func (f *flushWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+func (f *flushWriter) Printf(format string, args ...any) {
+	fmt.Fprintf(f, format, args...)
+}
+
 func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
-	req, ok := parseDeployRequest(w, r)
-	if !ok {
+	req, err := parseDeployRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	appName := r.PathValue("name")
+	if err := validateAppName(appName); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	fw := newFlushWriter(w)
 	ctx := r.Context()
-	flushWriter := newFlushWriter(w)
+
+	fw.Printf("===> cloning %s\n", req.Repo)
 
 	tempDir, err := os.MkdirTemp("", "zeroku-")
 	if err != nil {
-		http.Error(w, "Failed to create temp dir: "+err.Error(), http.StatusInternalServerError)
+		fw.Printf("ERROR: create temp dir: %v\n", err)
 		return
 	}
 
-	commitID, err := deployer.Clone(ctx, flushWriter, req.Repo, req.GitRef, tempDir)
+	commitID, err := deployer.Clone(ctx, fw, req.Repo, req.GitRef, tempDir)
 	if err != nil {
-		http.Error(w, "Failed to clone: "+err.Error(), http.StatusInternalServerError)
+		fw.Printf("ERROR: clone: %v\n", err)
 		return
 	}
 	defer os.RemoveAll(tempDir)
 
-	appName := r.PathValue("name")
+	fw.Printf("===> building (commit %s)\n", commitID)
 
 	releaseID, err := s.store.BeginRelease(appName, req.Repo, req.ContainerPort)
 	if err != nil {
-		http.Error(w, "Failed to begin release: "+err.Error(), http.StatusInternalServerError)
+		fw.Printf("ERROR: begin release: %v\n", err)
 		return
 	}
 
 	image := fmt.Sprintf("zeroku/%s:%d-%s", appName, releaseID, commitID)
 
-	if err := deployer.Build(ctx, flushWriter, tempDir, image); err != nil {
-		http.Error(w, "Failed to build: "+err.Error(), http.StatusInternalServerError)
+	if err := deployer.Build(ctx, fw, tempDir, image); err != nil {
+		// TODO: save build error to store
+		fw.Printf("ERROR: build: %v\n", err)
 		return
 	}
 
-}
-
-func (s *Server) HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]string{"message": "Hello World"}
-	jsonResp, err := json.Marshal(resp)
-	if err != nil {
-		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(jsonResp); err != nil {
-		log.Printf("Failed to write response: %v", err)
-	}
+	fw.Printf("===> build complete: %s\n", image)
 }

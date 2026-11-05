@@ -1,10 +1,13 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -53,8 +56,25 @@ func (c *Client) Deploy(appName string, req DeployRequest) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("deployment failed: API returned %s", resp.Status)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("deploy failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var lastLine string
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Println(line)
+		lastLine = line
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("stream: %w", err)
+	}
+
+	if strings.HasPrefix(lastLine, "ERROR:") {
+		return fmt.Errorf("deploy failed: %s", strings.TrimSpace(lastLine[6:]))
 	}
 
 	return nil
