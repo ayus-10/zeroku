@@ -28,6 +28,8 @@ func main() {
 		err = destroyCmd()
 	case "deploy":
 		err = deployCmd(os.Args[2:])
+	case "list":
+		err = listCmd()
 	default:
 		usage()
 		os.Exit(2)
@@ -40,7 +42,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: zeroku <init|deploy|destroy> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: zeroku <init|deploy|destroy|list> [flags]")
 }
 
 func initCmd(args []string) error {
@@ -122,9 +124,49 @@ func deployCmd(args []string) error {
 	appName := remaining[0]
 	gitURL := remaining[1]
 
-	c := client.New("http://localhost:8080") // TODO: update this
+	url := fmt.Sprintf("http://localhost:%s", os.Getenv("PORT")) // TODO: update this
+	c := client.New(url)
 	if err := c.Deploy(appName, client.DeployRequest{Repo: gitURL, GitRef: *gitRef, ContainerPort: *port}); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func getCmd(args []string) error {
+	fs := flag.NewFlagSet("get", flag.ContinueOnError)
+
+	appName := fs.String("name", "", "App name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	remaining := fs.Args()
+	if len(remaining) != 0 {
+		return fmt.Errorf("usage: zeroku get [--name <appname>]")
+	}
+
+	url := fmt.Sprintf("http://localhost:%s", os.Getenv("PORT")) // TODO: update this
+	c := client.New(url)
+	app, err := c.GetApp(*appName)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(app)
+	return nil
+}
+
+func listCmd() error {
+	url := fmt.Sprintf("http://localhost:%s", os.Getenv("PORT")) // TODO: update this
+	c := client.New(url)
+	apps, err := c.ListApps()
+	if err != nil {
+		return err
+	}
+
+	for _, app := range apps {
+		fmt.Println(app)
 	}
 
 	return nil

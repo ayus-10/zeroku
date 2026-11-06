@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"time"
 )
@@ -39,6 +40,24 @@ type App struct {
 	Releases      []Release         `json:"releases"`
 	CurrentID     int               `json:"current_id"` // 0 = nothing live
 	NextID        int               `json:"next_id"`
+}
+
+type AppSummary struct {
+	Name          string `json:"name"`
+	Repo          string `json:"repo"`
+	ContainerPort int    `json:"container_port"`
+	CurrentID     int    `json:"current_id"`
+	NextID        int    `json:"next_id"`
+}
+
+type AppDetails struct {
+	Name          string    `json:"name"`
+	Repo          string    `json:"repo"`
+	ContainerPort int       `json:"container_port"`
+	HasEnv        bool      `json:"has_env"`
+	Releases      []Release `json:"releases"`
+	CurrentID     int       `json:"current_id"`
+	NextID        int       `json:"next_id"`
 }
 
 type Data struct {
@@ -101,6 +120,50 @@ func (s *Store) BeginRelease(name, repo string, containerPort int) (int, error) 
 		return nil
 	})
 	return id, err
+}
+
+func (s *Store) ListApps() []AppSummary {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make([]AppSummary, 0, len(s.data.Apps))
+	for _, app := range s.data.Apps {
+		apps = append(apps, AppSummary{
+			Name:          app.Name,
+			Repo:          app.Repo,
+			ContainerPort: app.ContainerPort,
+			CurrentID:     app.CurrentID,
+			NextID:        app.NextID,
+		})
+	}
+
+	return apps
+}
+
+func (s *Store) GetApp(name string) *AppDetails {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	app := s.data.Apps[name]
+	if app == nil {
+		return nil
+	}
+	return &AppDetails{
+		Name:          app.Name,
+		Repo:          app.Repo,
+		ContainerPort: app.ContainerPort,
+		HasEnv:        len(app.Env) > 0,
+		Releases:      slices.Clone(app.Releases),
+		CurrentID:     app.CurrentID,
+		NextID:        app.NextID,
+	}
+}
+
+func (s *Store) CheckAppExists(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.data.Apps[name]
+	return ok
 }
 
 func (s *Store) UsedPorts() map[int]bool {

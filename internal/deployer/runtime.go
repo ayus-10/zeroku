@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func run(ctx context.Context, out io.Writer, dir string, env []string, name string, args ...string) error {
@@ -67,4 +69,33 @@ func WriteEnvFile(path string, containerPort int, env map[string]string) error {
 	}
 
 	return os.WriteFile(path, []byte(b.String()), 0o600)
+}
+
+func WaitHealthy(ctx context.Context, port int, path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	url := fmt.Sprintf("http://localhost:%d%s", port, path) // TODO: update this
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode < 500 {
+				return nil
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+
+	return fmt.Errorf("app did not become healthy within %s", timeout)
+}
+
+func StreamLogs(ctx context.Context, out io.Writer, container string, lines int) {
+	args := []string{"logs", "--tail", fmt.Sprint(lines), container}
+	_ = run(ctx, out, "", nil, "docker", args...)
 }

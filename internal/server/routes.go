@@ -4,13 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 
 	"github.com/ayus-10/zeroku/internal/client"
 	"github.com/ayus-10/zeroku/internal/deployer"
+	"github.com/ayus-10/zeroku/internal/state"
 )
 
 type flushWriter struct {
@@ -23,6 +26,8 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	// Register routes
 	mux.HandleFunc("POST /v1/apps/{name}/deploy", s.DeployHandler)
+	mux.HandleFunc("GET /v1/apps", s.ListAppsHandler)
+	// mux.HandleFunc("POST /v1/apps/{name}/stop", s.StopAppHandler)
 
 	// Wrap the mux with CORS middleware
 	return s.corsMiddleware(mux)
@@ -176,6 +181,45 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fw.Printf("===> deployment complete: %s on port %d\n", containerName, hostPort)
+	fw.Printf("===> waiting for health check\n")
+
+	if err := deployer.WaitHealthy(ctx, hostPort, "/", 30*time.Second); err != nil {
+		deployer.StreamLogs(ctx, fw, containerName, 30)
+		fw.Printf("ERROR: health check: %v\n", err)
+		return
+	}
+
+	fw.Printf("URL: http://localhost:%d\n", hostPort)
 
 }
+
+func (s *Server) ListAppsHandler(w http.ResponseWriter, r *http.Request) {
+	apps := s.store.ListApps()
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := json.NewEncoder(w).Encode(map[string][]state.AppSummary{
+		"apps": apps,
+	}); err != nil {
+		log.Printf("encode apps response: %v", err)
+	}
+}
+
+func (s *Server) GetAppHandler(w http.ResponseWriter, r *http.Request) {
+	appName := r.PathValue("name")
+	app := s.store.GetApp(appName)
+	if app == nil {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := json.NewEncoder(w).Encode(app); err != nil {
+		log.Printf("encode app response: %v", err)
+	}
+}
+
+// func (s *Server) StopAppHandler(w http.ResponseWriter, r *http.Request) {
+// 	appName := r.PathValue("name")
+// }

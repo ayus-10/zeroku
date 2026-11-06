@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ayus-10/zeroku/internal/state"
 )
 
 type DeployRequest struct {
@@ -78,4 +80,70 @@ func (c *Client) Deploy(appName string, req DeployRequest) error {
 	}
 
 	return nil
+}
+
+func (c *Client) GetApp(appName string) (*state.AppDetails, error) {
+	url := fmt.Sprintf("%s/v1/apps/%s", c.BaseURL, appName)
+
+	httpReq, err := http.NewRequest(
+		http.MethodGet,
+		url,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create get app request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send get app request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get app failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var app state.AppDetails
+	if err := json.NewDecoder(resp.Body).Decode(&app); err != nil {
+		return nil, fmt.Errorf("decode get app response: %w", err)
+	}
+
+	return &app, nil
+}
+
+func (c *Client) ListApps() ([]state.AppSummary, error) {
+	url := fmt.Sprintf("%s/v1/apps", c.BaseURL)
+
+	httpReq, err := http.NewRequest(
+		http.MethodGet,
+		url,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create list apps request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send list apps request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list apps failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var apps []state.AppSummary
+	if err := json.NewDecoder(resp.Body).Decode(&apps); err != nil {
+		return nil, fmt.Errorf("decode list apps response: %w", err)
+	}
+
+	return apps, nil
 }
