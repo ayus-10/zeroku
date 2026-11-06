@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 
 	"github.com/ayus-10/zeroku/internal/client"
@@ -149,4 +150,32 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fw.Printf("===> build complete: %s\n", image)
+
+	hostPort, err := deployer.AllocPort(s.store.UsedPorts())
+	if err != nil {
+		fw.Printf("ERROR: alloc port: %v\n", err)
+		return
+	}
+
+	containerName := fmt.Sprintf("%s-%d", appName, releaseID)
+
+	envFile := fmt.Sprintf("%s/env/%s", os.Getenv("STATE_DIR"), containerName)
+	if err := os.MkdirAll(filepath.Dir(envFile), 0o755); err != nil {
+		fw.Printf("ERROR: create env dir: %v\n", err)
+		return
+	}
+	if err := deployer.WriteEnvFile(envFile, req.ContainerPort, nil); err != nil { // TODO: pass env
+		fw.Printf("ERROR: write env file: %v\n", err)
+		return
+	}
+
+	fw.Printf("===> deploying %s on port %d\n", containerName, hostPort)
+
+	if err := deployer.RunContainer(ctx, fw, containerName, image, envFile, hostPort, req.ContainerPort); err != nil {
+		fw.Printf("ERROR: run container: %v\n", err)
+		return
+	}
+
+	fw.Printf("===> deployment complete: %s on port %d\n", containerName, hostPort)
+
 }

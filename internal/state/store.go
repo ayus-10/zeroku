@@ -16,6 +16,7 @@ const (
 	StatusRunning  Status = "running"
 	StatusStopped  Status = "stopped"
 	StatusFailed   Status = "failed"
+	StatusRemoved  Status = "removed"
 )
 
 type Release struct {
@@ -100,6 +101,20 @@ func (s *Store) BeginRelease(name, repo string, containerPort int) (int, error) 
 		return nil
 	})
 	return id, err
+}
+
+func (s *Store) UsedPorts() map[int]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	used := make(map[int]bool)
+	for _, app := range s.data.Apps {
+		for _, rel := range app.Releases {
+			if rel.HostPort != 0 && (rel.Status == StatusRunning || rel.Status == StatusBuilding) {
+				used[rel.HostPort] = true
+			}
+		}
+	}
+	return used
 }
 
 func NewStore(path string) (*Store, error) {
