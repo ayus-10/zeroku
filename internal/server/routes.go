@@ -8,10 +8,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"time"
 
-	"github.com/ayus-10/zeroku/internal/client"
+	"github.com/ayus-10/zeroku/internal/api"
 	"github.com/ayus-10/zeroku/internal/deployer"
 	"github.com/ayus-10/zeroku/internal/state"
 )
@@ -52,39 +51,18 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func parseDeployRequest(r *http.Request) (client.DeployRequest, error) {
-	var req client.DeployRequest
+func parseDeployRequest(r *http.Request) (api.DeployRequest, error) {
+	var req api.DeployRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return req, errors.New("invalid JSON body")
 	}
 
-	if req.Repo == "" {
-		return req, errors.New("repo is required")
-	}
-	if req.GitRef == "" {
-		req.GitRef = "main"
-	}
-	if req.ContainerPort < 1 || req.ContainerPort > 65535 {
-		return req, errors.New("container_port must be between 1 and 65535")
+	if req, err := validateDeployRequestPayload(req); err != nil {
+		return req, err
 	}
 
 	return req, nil
-}
-
-func validateAppName(name string) error {
-	var appNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
-
-	if name == "" {
-		return errors.New("app name is required")
-	}
-	if len(name) > 63 {
-		return fmt.Errorf("app name must be 63 characters or fewer, got %d", len(name))
-	}
-	if !appNamePattern.MatchString(name) {
-		return errors.New("app name may contain letters, digits, and hyphens, but must not start or end with a hyphen")
-	}
-	return nil
 }
 
 func newFlushWriter(w http.ResponseWriter) *flushWriter {
@@ -169,7 +147,8 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		fw.Printf("ERROR: create env dir: %v\n", err)
 		return
 	}
-	if err := deployer.WriteEnvFile(envFile, req.ContainerPort, nil); err != nil { // TODO: pass env
+
+	if err := deployer.WriteEnvFile(envFile, req.ContainerPort, req.Env); err != nil {
 		fw.Printf("ERROR: write env file: %v\n", err)
 		return
 	}

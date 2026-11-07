@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ayus-10/zeroku/internal/config"
 )
 
 func run(ctx context.Context, out io.Writer, dir string, env []string, name string, args ...string) error {
@@ -73,7 +75,10 @@ func WriteEnvFile(path string, containerPort int, env map[string]string) error {
 
 func WaitHealthy(ctx context.Context, port int, path string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	url := fmt.Sprintf("http://localhost:%d%s", port, path) // TODO: update this
+	url, err := config.ServiceURL(path)
+	if err != nil {
+		return fmt.Errorf("failed to get service URL: %w", err)
+	}
 	client := &http.Client{Timeout: 2 * time.Second}
 
 	for time.Now().Before(deadline) {

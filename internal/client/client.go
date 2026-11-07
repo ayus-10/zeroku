@@ -10,14 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ayus-10/zeroku/internal/api"
 	"github.com/ayus-10/zeroku/internal/state"
 )
-
-type DeployRequest struct {
-	Repo          string `json:"repo"`
-	GitRef        string `json:"git_ref"`
-	ContainerPort int    `json:"container_port"`
-}
 
 type Client struct {
 	BaseURL    string
@@ -33,7 +28,7 @@ func New(baseURL string) *Client {
 	}
 }
 
-func (c *Client) Deploy(appName string, req DeployRequest) error {
+func (c *Client) Deploy(appName string, req api.DeployRequest) error {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("marshal deploy request: %w", err)

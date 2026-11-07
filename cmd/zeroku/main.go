@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/ayus-10/zeroku/internal/api"
 	"github.com/ayus-10/zeroku/internal/awsinfra"
 	"github.com/ayus-10/zeroku/internal/cli"
 	"github.com/ayus-10/zeroku/internal/client"
+	"github.com/ayus-10/zeroku/internal/config"
 )
 
 func main() {
@@ -28,6 +30,8 @@ func main() {
 		err = destroyCmd()
 	case "deploy":
 		err = deployCmd(os.Args[2:])
+	case "get":
+		err = getCmd(os.Args[2:])
 	case "list":
 		err = listCmd()
 	default:
@@ -42,7 +46,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: zeroku <init|deploy|destroy|list> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: zeroku <init|deploy|destroy|list|get> [flags]")
 }
 
 func initCmd(args []string) error {
@@ -124,9 +128,9 @@ func deployCmd(args []string) error {
 	appName := remaining[0]
 	gitURL := remaining[1]
 
-	url := fmt.Sprintf("http://localhost:%s", os.Getenv("PORT")) // TODO: update this
+	url := config.BaseURL()
 	c := client.New(url)
-	if err := c.Deploy(appName, client.DeployRequest{Repo: gitURL, GitRef: *gitRef, ContainerPort: *port}); err != nil {
+	if err := c.Deploy(appName, api.DeployRequest{Repo: gitURL, GitRef: *gitRef, ContainerPort: *port}); err != nil {
 		return err
 	}
 
@@ -146,7 +150,7 @@ func getCmd(args []string) error {
 		return fmt.Errorf("usage: zeroku get [--name <appname>]")
 	}
 
-	url := fmt.Sprintf("http://localhost:%s", os.Getenv("PORT")) // TODO: update this
+	url := config.BaseURL()
 	c := client.New(url)
 	app, err := c.GetApp(*appName)
 	if err != nil {
@@ -158,7 +162,7 @@ func getCmd(args []string) error {
 }
 
 func listCmd() error {
-	url := fmt.Sprintf("http://localhost:%s", os.Getenv("PORT")) // TODO: update this
+	url := config.BaseURL()
 	c := client.New(url)
 	apps, err := c.ListApps()
 	if err != nil {
