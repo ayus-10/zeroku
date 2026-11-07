@@ -25,6 +25,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	// Register routes
 	mux.HandleFunc("POST /v1/apps/{name}/deploy", s.DeployHandler)
+	mux.HandleFunc("GET /v1/apps/{name}", s.GetAppHandler)
 	mux.HandleFunc("GET /v1/apps", s.ListAppsHandler)
 	// mux.HandleFunc("POST /v1/apps/{name}/stop", s.StopAppHandler)
 
@@ -199,6 +200,12 @@ func (s *Server) GetAppHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// func (s *Server) StopAppHandler(w http.ResponseWriter, r *http.Request) {
-// 	appName := r.PathValue("name")
-// }
+func (s *Server) StopAppHandler(w http.ResponseWriter, r *http.Request) {
+	appName := r.PathValue("name")
+
+	appID := s.store.GetAppID(appName)
+	if appID == 0 {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return
+	}
+}

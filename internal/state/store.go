@@ -104,6 +104,7 @@ func (s *Store) BeginRelease(name, repo string, containerPort int) (int, error) 
 			app = &App{
 				Name: name, Env: map[string]string{},
 			}
+			d.Apps[name] = app
 		}
 		app.Repo = repo
 		app.ContainerPort = containerPort
@@ -159,11 +160,14 @@ func (s *Store) GetApp(name string) *AppDetails {
 	}
 }
 
-func (s *Store) CheckAppExists(name string) bool {
+func (s *Store) GetAppID(name string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.data.Apps[name]
-	return ok
+	app := s.data.Apps[name]
+	if app == nil {
+		return 0
+	}
+	return app.CurrentID
 }
 
 func (s *Store) UsedPorts() map[int]bool {

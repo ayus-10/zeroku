@@ -110,7 +110,7 @@ func (c *Client) GetApp(appName string) (*state.AppDetails, error) {
 	return &app, nil
 }
 
-func (c *Client) ListApps() ([]state.AppSummary, error) {
+func (c *Client) ListApps() (map[string][]state.AppSummary, error) {
 	url := fmt.Sprintf("%s/v1/apps", c.BaseURL)
 
 	httpReq, err := http.NewRequest(
@@ -135,10 +135,10 @@ func (c *Client) ListApps() ([]state.AppSummary, error) {
 		return nil, fmt.Errorf("list apps failed: %s", strings.TrimSpace(string(body)))
 	}
 
-	var apps []state.AppSummary
-	if err := json.NewDecoder(resp.Body).Decode(&apps); err != nil {
+	var data map[string][]state.AppSummary
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, fmt.Errorf("decode list apps response: %w", err)
 	}
 
-	return apps, nil
+	return data, nil
 }
