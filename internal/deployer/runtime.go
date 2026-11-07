@@ -57,6 +57,13 @@ func RunContainer(ctx context.Context, out io.Writer, name, image, envFile strin
 	return run(ctx, out, "", nil, "docker", args...)
 }
 
+func StopContainer(ctx context.Context, out io.Writer, image string) error {
+	args := []string{
+		"stop", image,
+	}
+	return run(ctx, out, "", nil, "docker", args...)
+}
+
 func WriteEnvFile(path string, containerPort int, env map[string]string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "PORT=%d\n", containerPort)

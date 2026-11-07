@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,116 +31,113 @@ func New(baseURL string) *Client {
 }
 
 func (c *Client) Deploy(appName string, req api.DeployRequest) error {
-	body, err := json.Marshal(req)
+	resp, err := c.do(http.MethodPost, "/v1/apps/"+url.PathEscape(appName)+"/deploy", req)
 	if err != nil {
-		return fmt.Errorf("marshal deploy request: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/v1/apps/%s/deploy", c.BaseURL, appName)
-
-	httpReq, err := http.NewRequest(
-		http.MethodPost,
-		url,
-		bytes.NewBuffer(body),
-	)
-	if err != nil {
-		return fmt.Errorf("create deploy request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("send deploy request: %w", err)
+		return fmt.Errorf("deploy: %w", err)
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("deploy failed: %s", strings.TrimSpace(string(body)))
-	}
 
 	var lastLine string
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
-		line := scanner.Text()
-		fmt.Println(line)
-		lastLine = line
+		lastLine = scanner.Text()
+		fmt.Println(lastLine)
 	}
-
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("stream: %w", err)
 	}
 
-	if strings.HasPrefix(lastLine, "ERROR:") {
-		return fmt.Errorf("deploy failed: %s", strings.TrimSpace(lastLine[6:]))
+	if msg, ok := strings.CutPrefix(lastLine, "ERROR:"); ok {
+		return fmt.Errorf("deploy failed: %s", strings.TrimSpace(msg))
 	}
-
 	return nil
 }
 
 func (c *Client) GetApp(appName string) (*state.AppDetails, error) {
-	url := fmt.Sprintf("%s/v1/apps/%s", c.BaseURL, appName)
-
-	httpReq, err := http.NewRequest(
-		http.MethodGet,
-		url,
-		nil,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create get app request: %w", err)
+	var data state.AppDetails
+	if err := c.doJSON(http.MethodGet, "/v1/apps/"+url.PathEscape(appName), nil, &data); err != nil {
+		return nil, err
 	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("send get app request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("get app failed: %s", strings.TrimSpace(string(body)))
-	}
-
-	var app state.AppDetails
-	if err := json.NewDecoder(resp.Body).Decode(&app); err != nil {
-		return nil, fmt.Errorf("decode get app response: %w", err)
-	}
-
-	return &app, nil
+	return &data, nil
 }
 
 func (c *Client) ListApps() (map[string][]state.AppSummary, error) {
-	url := fmt.Sprintf("%s/v1/apps", c.BaseURL)
-
-	httpReq, err := http.NewRequest(
-		http.MethodGet,
-		url,
-		nil,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create list apps request: %w", err)
+	var data map[string][]state.AppSummary
+	if err := c.doJSON(http.MethodGet, "/v1/apps", nil, &data); err != nil {
+		return nil, err
 	}
+	return data, nil
+}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(httpReq)
+func (c *Client) Stop(appName string) error {
+	resp, err := c.do(http.MethodPost, "/v1/apps/"+url.PathEscape(appName)+"/stop", nil)
 	if err != nil {
-		return nil, fmt.Errorf("send list apps request: %w", err)
+		return fmt.Errorf("stop: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("list apps failed: %s", strings.TrimSpace(string(body)))
+	var lastLine string
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		lastLine = scanner.Text()
+		fmt.Println(lastLine)
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("stream: %w", err)
 	}
 
-	var data map[string][]state.AppSummary
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, fmt.Errorf("decode list apps response: %w", err)
+	if msg, ok := strings.CutPrefix(lastLine, "ERROR:"); ok {
+		return fmt.Errorf("deploy failed: %s", strings.TrimSpace(msg))
+	}
+	return nil
+}
+
+func (c *Client) do(method, path string, in any, okStatus ...int) (*http.Response, error) {
+	var body io.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return nil, fmt.Errorf("encode request: %w", err)
+		}
+		body = bytes.NewReader(b)
 	}
 
-	return data, nil
+	req, err := http.NewRequest(method, c.BaseURL+path, body)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send %s %s: %w", method, path, err)
+	}
+
+	if len(okStatus) == 0 {
+		okStatus = []int{http.StatusOK}
+	}
+	if !slices.Contains(okStatus, resp.StatusCode) {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("%s %s failed (%d): %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return resp, nil
+}
+
+func (c *Client) doJSON(method, path string, in, out any, okStatus ...int) error {
+	resp, err := c.do(method, path, in, okStatus...)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if out == nil {
+		return nil
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("decode %s %s response: %w", method, path, err)
+	}
+	return nil
 }

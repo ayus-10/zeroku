@@ -160,14 +160,41 @@ func (s *Store) GetApp(name string) *AppDetails {
 	}
 }
 
-func (s *Store) GetAppID(name string) int {
+func (s *Store) CurrentRelease(appName string) (*Release, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	app := s.data.Apps[name]
-	if app == nil {
-		return 0
+
+	app, ok := s.data.Apps[appName]
+	if !ok {
+		return nil, fmt.Errorf("app not found: %s", appName)
 	}
-	return app.CurrentID
+	if app.CurrentID == 0 {
+		return nil, fmt.Errorf("app %s has no running release", appName)
+	}
+
+	for i := range app.Releases {
+		if app.Releases[i].ID == app.CurrentID {
+			return &app.Releases[i], nil
+		}
+	}
+	return nil, fmt.Errorf("current release %d not found", app.CurrentID)
+}
+
+func (s *Store) StopRelease(appName string, releaseID int) error {
+	return s.Update(func(d *Data) error {
+		app, ok := d.Apps[appName]
+		if !ok {
+			return fmt.Errorf("app not found: %s", appName)
+		}
+		for i := range app.Releases {
+			if app.Releases[i].ID == releaseID {
+				app.Releases[i].Status = StatusStopped
+				app.CurrentID = 0
+				return nil
+			}
+		}
+		return fmt.Errorf("release not found: %d", releaseID)
+	})
 }
 
 func (s *Store) UsedPorts() map[int]bool {

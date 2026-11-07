@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	// Register routes
 	mux.HandleFunc("POST /v1/apps/{name}/deploy", s.DeployHandler)
+	mux.HandleFunc("POST /v1/apps/{name}/stop", s.StopAppHandler)
 	mux.HandleFunc("GET /v1/apps/{name}", s.GetAppHandler)
 	mux.HandleFunc("GET /v1/apps", s.ListAppsHandler)
 	// mux.HandleFunc("POST /v1/apps/{name}/stop", s.StopAppHandler)
@@ -203,9 +205,24 @@ func (s *Server) GetAppHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) StopAppHandler(w http.ResponseWriter, r *http.Request) {
 	appName := r.PathValue("name")
 
-	appID := s.store.GetAppID(appName)
-	if appID == 0 {
+	fw := newFlushWriter(w)
+	ctx := context.Background()
+
+	rel, err := s.store.CurrentRelease(appName)
+	if err != nil {
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
 	}
+
+	fw.Printf("===> stopping %s (release %d)\n", appName, rel.ID)
+
+	if err := deployer.StopContainer(ctx, fw, appName); err != nil {
+		fw.Printf("ERROR: stop container: %v\n", err)
+	}
+
+	if err := s.store.StopRelease(appName, rel.ID); err != nil {
+		fw.Printf("ERROR: stop release: %v\n", err)
+	}
+
+	fw.Printf("===> stopped\n")
 }

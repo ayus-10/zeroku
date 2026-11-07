@@ -34,6 +34,8 @@ func main() {
 		err = getCmd(os.Args[2:])
 	case "list":
 		err = listCmd()
+	case "stop":
+		err = stopCmd(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -171,6 +173,28 @@ func listCmd() error {
 
 	for _, app := range apps {
 		fmt.Println(app)
+	}
+
+	return nil
+}
+
+func stopCmd(args []string) error {
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+
+	appName := fs.String("name", "", "App name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	remaining := fs.Args()
+	if len(remaining) != 0 {
+		return fmt.Errorf("usage: zeroku stop [--name <appname>]")
+	}
+
+	url := config.BaseURL()
+	c := client.New(url)
+	if err := c.Stop(*appName); err != nil {
+		return err
 	}
 
 	return nil
