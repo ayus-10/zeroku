@@ -157,15 +157,21 @@ func (s *Store) BeginRelease(name, commit string) (Release, error) {
 	return rel, err
 }
 
-func (s *Store) SetCurrent(name string, id int) error {
-	return s.Update(func(d *Data) error {
+func (s *Store) SetCurrent(name string, id int) (*Release, error) {
+	var prev *Release
+	err := s.Update(func(d *Data) error {
 		app, ok := d.Apps[name]
 		if !ok {
 			return fmt.Errorf("app %s not found", name)
 		}
+		if i := slices.IndexFunc(app.Releases, func(r Release) bool { return r.ID == app.CurrentID }); i >= 0 {
+			cp := app.Releases[i]
+			prev = &cp
+		}
 		app.CurrentID = id
 		return nil
 	})
+	return prev, err
 }
 
 func (s *Store) ListApps() []AppSummary {
@@ -209,8 +215,8 @@ func (s *Store) CurrentRelease(appName string) (*Release, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	app, ok := s.data.Apps[appName]
-	if !ok {
+	app := s.data.Apps[appName]
+	if app == nil {
 		return nil, fmt.Errorf("app not found: %s", appName)
 	}
 	if app.CurrentID == 0 {

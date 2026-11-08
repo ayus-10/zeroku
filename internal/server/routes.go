@@ -106,6 +106,7 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 	fw.Printf("===> cloning %s\n", req.Repo)
 
 	tempDir, err := os.MkdirTemp("", "zeroku-")
+	defer os.RemoveAll(tempDir)
 	if err != nil {
 		fw.Printf("ERROR: create temp dir: %v\n", err)
 		return
@@ -116,7 +117,6 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		fw.Printf("ERROR: clone: %v\n", err)
 		return
 	}
-	defer os.RemoveAll(tempDir)
 
 	fw.Printf("===> building (commit %s)\n", commitID)
 
@@ -131,8 +131,21 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var started bool
+	fail := func(msg string, err error) {
+		fw.Printf("ERROR: %s: %v\n", msg, err)
+		cctx := context.WithoutCancel(ctx) // cleanup must survive a cancelled request
+		if started {
+			_ = deployer.StopContainer(cctx, fw, rel.Container)
+		}
+		_ = s.store.UpdateRelease(appName, rel.ID, func(r *state.Release) {
+			r.Status = state.StatusFailed
+			r.Error = err.Error()
+		})
+	}
+
 	if err := deployer.Build(ctx, fw, tempDir, rel.Image); err != nil {
-		fw.Printf("ERROR: build: %v\n", err)
+		fail("build", err)
 		return
 	}
 
@@ -140,35 +153,35 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 
 	hostPort, err := deployer.AllocPort(s.store.UsedPorts())
 	if err != nil {
-		fw.Printf("ERROR: alloc port: %v\n", err)
+		fail("allocate port", err)
 		return
 	}
 
 	envFile := fmt.Sprintf("%s/env/%s", os.Getenv("STATE_DIR"), rel.Container)
 	if err := os.MkdirAll(filepath.Dir(envFile), 0o755); err != nil {
-		fw.Printf("ERROR: create env dir: %v\n", err)
+		fail("create env dir", err)
 		return
 	}
 
 	if err := deployer.WriteEnvFile(envFile, req.ContainerPort, req.Env); err != nil {
-		fw.Printf("ERROR: write env file: %v\n", err)
+		fail("write env file", err)
 		return
 	}
 
 	fw.Printf("===> deploying %s on port %d\n", rel.Container, hostPort)
 
+	started = true
 	if err := deployer.RunContainer(ctx, fw, rel.Container, rel.Image, envFile, hostPort, req.ContainerPort); err != nil {
-		fw.Printf("ERROR: run container: %v\n", err)
+		fail("run container", err)
 		return
 	}
 
 	if err := s.store.UpdateRelease(appName, rel.ID, func(r *state.Release) {
-		r.Container = rel.Container
 		r.HostPort = hostPort
 		r.EnvFile = envFile
 		r.Status = state.StatusRunning
 	}); err != nil {
-		fw.Printf("ERROR: update release: %v\n", err)
+		fail("update release", err)
 		return
 	}
 
@@ -176,17 +189,26 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := deployer.WaitHealthy(ctx, hostPort, "/", 30*time.Second); err != nil {
 		deployer.StreamLogs(ctx, fw, rel.Container, 30)
-		fw.Printf("ERROR: health check: %v\n", err)
+		fail("health check", err)
 		return
 	}
 
-	if err := s.store.SetCurrent(appName, rel.ID); err != nil {
-		fw.Printf("ERROR: set current: %v\n", err)
+	prev, err := s.store.SetCurrent(appName, rel.ID)
+	if err != nil {
+		fail("set current", err)
 		return
+	}
+	if prev != nil {
+		fw.Printf("===> stopping previous release %d\n", prev.ID)
+		if err := deployer.StopContainer(ctx, fw, prev.Container); err != nil {
+			fw.Printf("WARN: stop previous container: %v\n", err)
+		}
+		if err := s.store.StopRelease(appName, prev.ID); err != nil {
+			fw.Printf("WARN: record stopped release: %v\n", err)
+		}
 	}
 
 	fw.Printf("URL: http://localhost:%d\n", hostPort)
-
 }
 
 func (s *Server) ListAppsHandler(w http.ResponseWriter, r *http.Request) {
@@ -222,13 +244,13 @@ func (s *Server) StopAppHandler(w http.ResponseWriter, r *http.Request) {
 
 	rel, err := s.store.CurrentRelease(appName)
 	if err != nil {
-		http.Error(w, "app not found", http.StatusNotFound)
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
 	fw.Printf("===> stopping %s (release %d)\n", appName, rel.ID)
 
-	if err := deployer.StopContainer(ctx, fw, appName); err != nil {
+	if err := deployer.StopContainer(ctx, fw, rel.Container); err != nil {
 		fw.Printf("ERROR: stop container: %v\n", err)
 	}
 
