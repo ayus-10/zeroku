@@ -231,20 +231,21 @@ func (s *Store) CurrentRelease(appName string) (*Release, error) {
 	return nil, fmt.Errorf("current release %d not found", app.CurrentID)
 }
 
-func (s *Store) StopRelease(appName string, releaseID int) error {
+func (s *Store) StopRelease(name string, id int) error {
 	return s.Update(func(d *Data) error {
-		app, ok := d.Apps[appName]
+		app, ok := d.Apps[name]
 		if !ok {
-			return fmt.Errorf("app not found: %s", appName)
+			return fmt.Errorf("app %s not found", name)
 		}
-		for i := range app.Releases {
-			if app.Releases[i].ID == releaseID {
-				app.Releases[i].Status = StatusStopped
-				app.CurrentID = 0
-				return nil
-			}
+		i := slices.IndexFunc(app.Releases, func(r Release) bool { return r.ID == id })
+		if i < 0 {
+			return fmt.Errorf("release %d not found", id)
 		}
-		return fmt.Errorf("release not found: %d", releaseID)
+		app.Releases[i].Status = StatusStopped
+		if app.CurrentID == id {
+			app.CurrentID = 0
+		}
+		return nil
 	})
 }
 
