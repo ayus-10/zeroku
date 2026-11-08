@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"time"
 )
@@ -16,6 +17,7 @@ const (
 	StatusRunning  Status = "running"
 	StatusStopped  Status = "stopped"
 	StatusFailed   Status = "failed"
+	StatusRemoved  Status = "removed"
 )
 
 type Release struct {
@@ -25,7 +27,7 @@ type Release struct {
 	Container string    `json:"container"`
 	HostPort  int       `json:"host_port"`
 	Status    Status    `json:"status"`
-	EnvData   string    `json:"env_file"`
+	EnvFile   string    `json:"env_file"`
 	CreatedAt time.Time `json:"created_at"`
 	Error     string    `json:"error,omitempty"`
 }
@@ -40,6 +42,24 @@ type App struct {
 	NextID        int               `json:"next_id"`
 }
 
+type AppSummary struct {
+	Name          string `json:"name"`
+	Repo          string `json:"repo"`
+	ContainerPort int    `json:"container_port"`
+	CurrentID     int    `json:"current_id"`
+	NextID        int    `json:"next_id"`
+}
+
+type AppDetails struct {
+	Name          string    `json:"name"`
+	Repo          string    `json:"repo"`
+	ContainerPort int       `json:"container_port"`
+	HasEnv        bool      `json:"has_env"`
+	Releases      []Release `json:"releases"`
+	CurrentID     int       `json:"current_id"`
+	NextID        int       `json:"next_id"`
+}
+
 type Data struct {
 	Apps map[string]*App `json:"apps"`
 }
@@ -48,6 +68,17 @@ type Store struct {
 	mu   sync.Mutex
 	path string
 	data Data
+}
+
+func newRelease(appName string, id int, commit string) Release {
+	return Release{
+		ID:        id,
+		Commit:    commit,
+		Image:     fmt.Sprintf("zeroku/%s:%d-%s", appName, id, commit),
+		Container: fmt.Sprintf("zeroku-%s-%d", appName, id),
+		Status:    StatusBuilding,
+		CreatedAt: time.Now(),
+	}
 }
 
 func (s *Store) saveLocked() error {
@@ -72,34 +103,164 @@ func (s *Store) Update(fn func(*Data) error) error {
 	return s.saveLocked()
 }
 
-func (s *Store) BeginRelease(name, repo string, containerPort int) (int, error) {
-	var id int
+func (s *Store) UpdateRelease(name string, id int, fn func(*Release)) error {
+	return s.Update(func(d *Data) error {
+		app, ok := d.Apps[name]
+		if !ok {
+			return fmt.Errorf("app %s not found", name)
+		}
+		i := slices.IndexFunc(app.Releases, func(r Release) bool { return r.ID == id })
+		if i < 0 {
+			return fmt.Errorf("release %d not found", id)
+		}
+		fn(&app.Releases[i])
+		return nil
+	})
 
-	err := s.Update(func(d *Data) error {
+}
+
+func (s *Store) UpsertApp(name, repo string, containerPort int, env map[string]string) error {
+	return s.Update(func(d *Data) error {
 		if d.Apps == nil {
 			d.Apps = map[string]*App{}
 		}
 		app, ok := d.Apps[name]
 		if !ok {
-			app = &App{
-				Name: name, Env: map[string]string{},
-			}
+			app = &App{Name: name, NextID: 1}
+			d.Apps[name] = app
+		}
+		if env == nil {
+			env = map[string]string{}
 		}
 		app.Repo = repo
 		app.ContainerPort = containerPort
-
-		app.NextID++
-		id = app.NextID
-
-		app.Releases = append(app.Releases, Release{
-			ID:        id,
-			Image:     fmt.Sprintf("zeroku/%s:%d", name, id),
-			Status:    StatusBuilding,
-			CreatedAt: time.Now(),
-		})
+		app.Env = env
 		return nil
 	})
-	return id, err
+}
+
+func (s *Store) BeginRelease(name, commit string) (Release, error) {
+	var rel Release
+	err := s.Update(func(d *Data) error {
+		app, ok := d.Apps[name]
+		if !ok {
+			return fmt.Errorf("app %s not found", name)
+		}
+		if app.NextID == 0 {
+			app.NextID = 1
+		}
+		rel = newRelease(name, app.NextID, commit)
+		app.NextID++
+		app.Releases = append(app.Releases, rel)
+		return nil
+	})
+	return rel, err
+}
+
+func (s *Store) SetCurrent(name string, id int) (*Release, error) {
+	var prev *Release
+	err := s.Update(func(d *Data) error {
+		app, ok := d.Apps[name]
+		if !ok {
+			return fmt.Errorf("app %s not found", name)
+		}
+		if i := slices.IndexFunc(app.Releases, func(r Release) bool { return r.ID == app.CurrentID }); i >= 0 {
+			cp := app.Releases[i]
+			prev = &cp
+		}
+		app.CurrentID = id
+		return nil
+	})
+	return prev, err
+}
+
+func (s *Store) ListApps() []AppSummary {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make([]AppSummary, 0, len(s.data.Apps))
+	for _, app := range s.data.Apps {
+		apps = append(apps, AppSummary{
+			Name:          app.Name,
+			Repo:          app.Repo,
+			ContainerPort: app.ContainerPort,
+			CurrentID:     app.CurrentID,
+			NextID:        app.NextID,
+		})
+	}
+
+	return apps
+}
+
+func (s *Store) GetApp(name string) *AppDetails {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	app := s.data.Apps[name]
+	if app == nil {
+		return nil
+	}
+	return &AppDetails{
+		Name:          app.Name,
+		Repo:          app.Repo,
+		ContainerPort: app.ContainerPort,
+		HasEnv:        len(app.Env) > 0,
+		Releases:      slices.Clone(app.Releases),
+		CurrentID:     app.CurrentID,
+		NextID:        app.NextID,
+	}
+}
+
+func (s *Store) CurrentRelease(appName string) (*Release, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	app := s.data.Apps[appName]
+	if app == nil {
+		return nil, fmt.Errorf("app not found: %s", appName)
+	}
+	if app.CurrentID == 0 {
+		return nil, fmt.Errorf("app %s has no running release", appName)
+	}
+
+	for i := range app.Releases {
+		if app.Releases[i].ID == app.CurrentID {
+			return &app.Releases[i], nil
+		}
+	}
+	return nil, fmt.Errorf("current release %d not found", app.CurrentID)
+}
+
+func (s *Store) StopRelease(name string, id int) error {
+	return s.Update(func(d *Data) error {
+		app, ok := d.Apps[name]
+		if !ok {
+			return fmt.Errorf("app %s not found", name)
+		}
+		i := slices.IndexFunc(app.Releases, func(r Release) bool { return r.ID == id })
+		if i < 0 {
+			return fmt.Errorf("release %d not found", id)
+		}
+		app.Releases[i].Status = StatusStopped
+		if app.CurrentID == id {
+			app.CurrentID = 0
+		}
+		return nil
+	})
+}
+
+func (s *Store) UsedPorts() map[int]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	used := make(map[int]bool)
+	for _, app := range s.data.Apps {
+		for _, rel := range app.Releases {
+			if rel.HostPort != 0 && (rel.Status == StatusRunning || rel.Status == StatusBuilding) {
+				used[rel.HostPort] = true
+			}
+		}
+	}
+	return used
 }
 
 func NewStore(path string) (*Store, error) {
