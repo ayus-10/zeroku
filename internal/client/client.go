@@ -61,8 +61,8 @@ func (c *Client) GetApp(appName string) (*state.AppDetails, error) {
 	return &data, nil
 }
 
-func (c *Client) ListApps() (map[string][]state.AppSummary, error) {
-	var data map[string][]state.AppSummary
+func (c *Client) ListApps() ([]state.AppSummary, error) {
+	var data []state.AppSummary
 	if err := c.doJSON(http.MethodGet, "/v1/apps", nil, &data); err != nil {
 		return nil, err
 	}

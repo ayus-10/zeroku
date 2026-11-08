@@ -1,43 +1,31 @@
-# Simple Makefile for a Go project
+BIN_DIR := bin
+API_BIN := $(BIN_DIR)/api
+CLI_BIN := $(BIN_DIR)/cli
 
-# Build the application
-all: build test
+all: build
 
-build:
-	@echo "Building..."
-	
-	
-	@go build -o main cmd/api/main.go
+build: build-api build-cli
 
-# Run the application
-run:
-	@go run cmd/api/main.go
+build-api:
+	@mkdir -p $(BIN_DIR)
+	@echo "Building API..."
+	@go build -o $(API_BIN) ./cmd/api
 
-# Test the application
-test:
-	@echo "Testing..."
-	@go test ./... -v
+build-cli:
+	@mkdir -p $(BIN_DIR)
+	@echo "Building CLI..."
+	@go build -o $(CLI_BIN) ./cmd/cli
 
-# Clean the binary
+run: run-api run-cli
+
+run-api:
+	@echo "Running API..."
+	@$(API_BIN)
+
+run-cli:
+	@echo "Running CLI..."
+	@$(CLI_BIN)
+
 clean:
 	@echo "Cleaning..."
-	@rm -f main
-
-# Live Reload
-watch:
-	@if command -v air > /dev/null; then \
-            air; \
-            echo "Watching...";\
-        else \
-            read -p "Go's 'air' is not installed on your machine. Do you want to install it? [Y/n] " choice; \
-            if [ "$$choice" != "n" ] && [ "$$choice" != "N" ]; then \
-                go install github.com/air-verse/air@latest; \
-                air; \
-                echo "Watching...";\
-            else \
-                echo "You chose not to install air. Exiting..."; \
-                exit 1; \
-            fi; \
-        fi
-
-.PHONY: all build run test clean watch
+	@rm -rf $(BIN_DIR)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/ayus-10/zeroku/internal/cli"
 	"github.com/ayus-10/zeroku/internal/client"
 	"github.com/ayus-10/zeroku/internal/config"
+	"github.com/ayus-10/zeroku/internal/state"
 )
 
 func main() {
@@ -159,7 +161,12 @@ func getCmd(args []string) error {
 		return err
 	}
 
-	fmt.Println(app)
+	s, err := prettyPrintAppDetails(app)
+	if err != nil {
+		return err
+	}
+	fmt.Println(s)
+
 	return nil
 }
 
@@ -172,7 +179,11 @@ func listCmd() error {
 	}
 
 	for _, app := range apps {
-		fmt.Println(app)
+		s, err := prettyPrintAppSummary(&app)
+		if err != nil {
+			return err
+		}
+		fmt.Println(s)
 	}
 
 	return nil
@@ -198,4 +209,20 @@ func stopCmd(args []string) error {
 	}
 
 	return nil
+}
+
+func prettyPrintAppSummary(app *state.AppSummary) (string, error) {
+	b, err := json.MarshalIndent(app, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func prettyPrintAppDetails(app *state.AppDetails) (string, error) {
+	b, err := json.MarshalIndent(app, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

@@ -43,27 +43,6 @@ func AllocPort(used map[int]bool) (int, error) {
 	return 0, errors.New("no available port")
 }
 
-func RunContainer(ctx context.Context, out io.Writer, name, image, envFile string, hostPort, containerPort int) error {
-	args := []string{
-		"run", "-d",
-		"--name", name,
-		"--restart", "unless-stopped",
-		"--env-file", envFile,
-		"--cpus", "0.5",
-		"--memory", "256m",
-		"-p", strconv.Itoa(hostPort) + ":" + strconv.Itoa(containerPort),
-		image,
-	}
-	return run(ctx, out, "", nil, "docker", args...)
-}
-
-func StopContainer(ctx context.Context, out io.Writer, image string) error {
-	args := []string{
-		"stop", image,
-	}
-	return run(ctx, out, "", nil, "docker", args...)
-}
-
 func WriteEnvFile(path string, containerPort int, env map[string]string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "PORT=%d\n", containerPort)
@@ -105,9 +84,4 @@ func WaitHealthy(ctx context.Context, port int, path string, timeout time.Durati
 	}
 
 	return fmt.Errorf("app did not become healthy within %s", timeout)
-}
-
-func StreamLogs(ctx context.Context, out io.Writer, container string, lines int) {
-	args := []string{"logs", "--tail", fmt.Sprint(lines), container}
-	_ = run(ctx, out, "", nil, "docker", args...)
 }

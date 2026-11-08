@@ -27,7 +27,7 @@ type Release struct {
 	Container string    `json:"container"`
 	HostPort  int       `json:"host_port"`
 	Status    Status    `json:"status"`
-	EnvData   string    `json:"env_file"`
+	EnvFile   string    `json:"env_file"`
 	CreatedAt time.Time `json:"created_at"`
 	Error     string    `json:"error,omitempty"`
 }
@@ -70,6 +70,17 @@ type Store struct {
 	data Data
 }
 
+func newRelease(appName string, id int, commit string) Release {
+	return Release{
+		ID:        id,
+		Commit:    commit,
+		Image:     fmt.Sprintf("zeroku/%s:%d-%s", appName, id, commit),
+		Container: fmt.Sprintf("zeroku-%s-%d", appName, id),
+		Status:    StatusBuilding,
+		CreatedAt: time.Now(),
+	}
+}
+
 func (s *Store) saveLocked() error {
 	b, err := json.MarshalIndent(s.data, "", " ")
 	if err != nil {
@@ -92,35 +103,69 @@ func (s *Store) Update(fn func(*Data) error) error {
 	return s.saveLocked()
 }
 
-func (s *Store) BeginRelease(name, repo string, containerPort int) (int, error) {
-	var id int
+func (s *Store) UpdateRelease(name string, id int, fn func(*Release)) error {
+	return s.Update(func(d *Data) error {
+		app, ok := d.Apps[name]
+		if !ok {
+			return fmt.Errorf("app %s not found", name)
+		}
+		i := slices.IndexFunc(app.Releases, func(r Release) bool { return r.ID == id })
+		if i < 0 {
+			return fmt.Errorf("release %d not found", id)
+		}
+		fn(&app.Releases[i])
+		return nil
+	})
 
-	err := s.Update(func(d *Data) error {
+}
+
+func (s *Store) UpsertApp(name, repo string, containerPort int, env map[string]string) error {
+	return s.Update(func(d *Data) error {
 		if d.Apps == nil {
 			d.Apps = map[string]*App{}
 		}
 		app, ok := d.Apps[name]
 		if !ok {
-			app = &App{
-				Name: name, Env: map[string]string{},
-			}
+			app = &App{Name: name, NextID: 1}
 			d.Apps[name] = app
+		}
+		if env == nil {
+			env = map[string]string{}
 		}
 		app.Repo = repo
 		app.ContainerPort = containerPort
-
-		app.NextID++
-		id = app.NextID
-
-		app.Releases = append(app.Releases, Release{
-			ID:        id,
-			Image:     fmt.Sprintf("zeroku/%s:%d", name, id),
-			Status:    StatusBuilding,
-			CreatedAt: time.Now(),
-		})
+		app.Env = env
 		return nil
 	})
-	return id, err
+}
+
+func (s *Store) BeginRelease(name, commit string) (Release, error) {
+	var rel Release
+	err := s.Update(func(d *Data) error {
+		app, ok := d.Apps[name]
+		if !ok {
+			return fmt.Errorf("app %s not found", name)
+		}
+		if app.NextID == 0 {
+			app.NextID = 1
+		}
+		rel = newRelease(name, app.NextID, commit)
+		app.NextID++
+		app.Releases = append(app.Releases, rel)
+		return nil
+	})
+	return rel, err
+}
+
+func (s *Store) SetCurrent(name string, id int) error {
+	return s.Update(func(d *Data) error {
+		app, ok := d.Apps[name]
+		if !ok {
+			return fmt.Errorf("app %s not found", name)
+		}
+		app.CurrentID = id
+		return nil
+	})
 }
 
 func (s *Store) ListApps() []AppSummary {

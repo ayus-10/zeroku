@@ -29,7 +29,6 @@ func (s *Server) RegisterRoutes() http.Handler {
 	mux.HandleFunc("POST /v1/apps/{name}/stop", s.StopAppHandler)
 	mux.HandleFunc("GET /v1/apps/{name}", s.GetAppHandler)
 	mux.HandleFunc("GET /v1/apps", s.ListAppsHandler)
-	// mux.HandleFunc("POST /v1/apps/{name}/stop", s.StopAppHandler)
 
 	// Wrap the mux with CORS middleware
 	return s.corsMiddleware(mux)
@@ -121,21 +120,23 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 
 	fw.Printf("===> building (commit %s)\n", commitID)
 
-	releaseID, err := s.store.BeginRelease(appName, req.Repo, req.ContainerPort)
+	if err := s.store.UpsertApp(appName, req.Repo, req.ContainerPort, req.Env); err != nil {
+		fw.Printf("ERROR: save app: %v\n", err)
+		return
+	}
+
+	rel, err := s.store.BeginRelease(appName, commitID)
 	if err != nil {
 		fw.Printf("ERROR: begin release: %v\n", err)
 		return
 	}
 
-	image := fmt.Sprintf("zeroku/%s:%d-%s", appName, releaseID, commitID)
-
-	if err := deployer.Build(ctx, fw, tempDir, image); err != nil {
-		// TODO: save build error to store
+	if err := deployer.Build(ctx, fw, tempDir, rel.Image); err != nil {
 		fw.Printf("ERROR: build: %v\n", err)
 		return
 	}
 
-	fw.Printf("===> build complete: %s\n", image)
+	fw.Printf("===> build complete: %s\n", rel.Image)
 
 	hostPort, err := deployer.AllocPort(s.store.UsedPorts())
 	if err != nil {
@@ -143,9 +144,7 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerName := fmt.Sprintf("%s-%d", appName, releaseID)
-
-	envFile := fmt.Sprintf("%s/env/%s", os.Getenv("STATE_DIR"), containerName)
+	envFile := fmt.Sprintf("%s/env/%s", os.Getenv("STATE_DIR"), rel.Container)
 	if err := os.MkdirAll(filepath.Dir(envFile), 0o755); err != nil {
 		fw.Printf("ERROR: create env dir: %v\n", err)
 		return
@@ -156,18 +155,33 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fw.Printf("===> deploying %s on port %d\n", containerName, hostPort)
+	fw.Printf("===> deploying %s on port %d\n", rel.Container, hostPort)
 
-	if err := deployer.RunContainer(ctx, fw, containerName, image, envFile, hostPort, req.ContainerPort); err != nil {
+	if err := deployer.RunContainer(ctx, fw, rel.Container, rel.Image, envFile, hostPort, req.ContainerPort); err != nil {
 		fw.Printf("ERROR: run container: %v\n", err)
+		return
+	}
+
+	if err := s.store.UpdateRelease(appName, rel.ID, func(r *state.Release) {
+		r.Container = rel.Container
+		r.HostPort = hostPort
+		r.EnvFile = envFile
+		r.Status = state.StatusRunning
+	}); err != nil {
+		fw.Printf("ERROR: update release: %v\n", err)
 		return
 	}
 
 	fw.Printf("===> waiting for health check\n")
 
 	if err := deployer.WaitHealthy(ctx, hostPort, "/", 30*time.Second); err != nil {
-		deployer.StreamLogs(ctx, fw, containerName, 30)
+		deployer.StreamLogs(ctx, fw, rel.Container, 30)
 		fw.Printf("ERROR: health check: %v\n", err)
+		return
+	}
+
+	if err := s.store.SetCurrent(appName, rel.ID); err != nil {
+		fw.Printf("ERROR: set current: %v\n", err)
 		return
 	}
 
@@ -180,9 +194,7 @@ func (s *Server) ListAppsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	if err := json.NewEncoder(w).Encode(map[string][]state.AppSummary{
-		"apps": apps,
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(apps); err != nil {
 		log.Printf("encode apps response: %v", err)
 	}
 }
