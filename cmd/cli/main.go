@@ -126,7 +126,7 @@ func deployCmd(args []string) error {
 
 	remaining := fs.Args()
 	if len(remaining) != 2 {
-		return fmt.Errorf("usage: zeroku deploy <appname> <giturl> [--ref main] [--port 1234]")
+		return fmt.Errorf("usage: zeroku deploy [--ref <branch|tag|commit>] [--port <port>] <appname> <giturl>")
 	}
 
 	appName := remaining[0]
