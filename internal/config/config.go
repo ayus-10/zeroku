@@ -32,6 +32,10 @@ func BaseURL() string {
 	return fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(host, port))
 }
 
+func AuthToken() string {
+	return getEnv("AUTH_TOKEN", "")
+}
+
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

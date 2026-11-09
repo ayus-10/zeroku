@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ayus-10/zeroku/internal/config"
 	"github.com/ayus-10/zeroku/internal/state"
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -29,7 +30,12 @@ func NewServer() *http.Server {
 		log.Fatalf("failed to create state directory: %v", err)
 	}
 
-	store, err := state.NewStore(filepath.Join(stateDir, "state.json"))
+	authToken := config.AuthToken()
+	if len(authToken) < 32 {
+		log.Fatalf("AUTH_TOKEN must be at least 32 characters")
+	}
+
+	store, err := state.NewStore(filepath.Join(stateDir, "state.json"), authToken)
 	if err != nil {
 		log.Fatalf("failed to create store: %v", err)
 	}
@@ -39,7 +45,6 @@ func NewServer() *http.Server {
 		store: store,
 	}
 
-	// Declare Server config
 	server := &http.Server{
 		Addr:        fmt.Sprintf(":%d", NewServer.port),
 		Handler:     NewServer.RegisterRoutes(),

@@ -61,13 +61,18 @@ type AppDetails struct {
 }
 
 type Data struct {
-	Apps map[string]*App `json:"apps"`
+	Apps      map[string]*App `json:"apps"`
+	AuthToken string          `json:"auth_token"`
 }
 
 type Store struct {
 	mu   sync.Mutex
 	path string
 	data Data
+}
+
+func (s *Store) AuthToken() string {
+	return s.data.AuthToken
 }
 
 func newRelease(appName string, id int, commit string) Release {
@@ -263,8 +268,8 @@ func (s *Store) UsedPorts() map[int]bool {
 	return used
 }
 
-func NewStore(path string) (*Store, error) {
-	s := &Store{path: path}
+func NewStore(path string, authToken string) (*Store, error) {
+	s := &Store{path: path, data: Data{AuthToken: authToken}}
 
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {

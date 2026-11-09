@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ayus-10/zeroku/internal/api"
@@ -24,31 +26,37 @@ type flushWriter struct {
 func (s *Server) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
 
-	// Register routes
 	mux.HandleFunc("POST /v1/apps/{name}/deploy", s.DeployHandler)
 	mux.HandleFunc("POST /v1/apps/{name}/stop", s.StopAppHandler)
 	mux.HandleFunc("GET /v1/apps/{name}", s.GetAppHandler)
 	mux.HandleFunc("GET /v1/apps", s.ListAppsHandler)
 
-	// Wrap the mux with CORS middleware
-	return s.corsMiddleware(mux)
+	return s.corsMiddleware(s.authMiddleware(mux))
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Replace "*" with specific origins if needed
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-CSRF-Token")
-		w.Header().Set("Access-Control-Allow-Credentials", "false") // Set to "true" if credentials are required
+		w.Header().Set("Access-Control-Allow-Credentials", "false")
 
-		// Handle preflight OPTIONS requests
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// Proceed with the next handler
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.store.AuthToken())) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

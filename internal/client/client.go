@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ayus-10/zeroku/internal/api"
+	"github.com/ayus-10/zeroku/internal/config"
 	"github.com/ayus-10/zeroku/internal/state"
 )
 
@@ -109,6 +110,7 @@ func (c *Client) do(method, path string, in any, okStatus ...int) (*http.Respons
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Authorization", "Bearer "+config.AuthToken())
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
