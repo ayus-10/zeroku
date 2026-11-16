@@ -166,7 +166,7 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	envFile := fmt.Sprintf("%s/env/%s", os.Getenv("STATE_DIR"), rel.Container)
+	envFile := fmt.Sprintf("%s/env/%s", s.cfg.StateDir, rel.Container)
 	if err := os.MkdirAll(filepath.Dir(envFile), 0o755); err != nil {
 		fail("create env dir", err)
 		return
@@ -196,7 +196,7 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 
 	fw.Printf("===> waiting for health check\n")
 
-	if err := deployer.WaitHealthy(ctx, hostPort, "/", 30*time.Second); err != nil {
+	if err := deployer.WaitHealthy(ctx, hostPort, s.cfg.ServiceURL("/"), 30*time.Second); err != nil {
 		deployer.StreamLogs(ctx, fw, rel.Container, 30)
 		fail("health check", err)
 		return
@@ -217,7 +217,7 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fw.Printf("URL: http://localhost:%d\n", hostPort)
+	fw.Printf("URL: http://127.0.0.1:%d\n", hostPort)
 }
 
 func (s *Server) ListAppsHandler(w http.ResponseWriter, r *http.Request) {

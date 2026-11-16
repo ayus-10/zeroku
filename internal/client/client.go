@@ -13,18 +13,19 @@ import (
 	"time"
 
 	"github.com/ayus-10/zeroku/internal/api"
-	"github.com/ayus-10/zeroku/internal/config"
 	"github.com/ayus-10/zeroku/internal/state"
 )
 
 type Client struct {
 	BaseURL    string
+	AuthToken  string
 	HTTPClient *http.Client
 }
 
-func New(baseURL string) *Client {
+func New(baseURL string, authToken string) *Client {
 	return &Client{
-		BaseURL: baseURL,
+		BaseURL:   baseURL,
+		AuthToken: authToken,
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Minute,
 		},
@@ -110,7 +111,7 @@ func (c *Client) do(method, path string, in any, okStatus ...int) (*http.Respons
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("Authorization", "Bearer "+config.AuthToken())
+	req.Header.Set("Authorization", "Bearer "+c.AuthToken)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

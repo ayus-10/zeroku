@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 
@@ -23,21 +24,24 @@ func main() {
 		os.Exit(2)
 	}
 
-	var err error
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
 
 	switch os.Args[1] {
 	case "init":
 		err = initCmd(os.Args[2:])
-	case "destroy":
-		err = destroyCmd()
-	case "deploy":
-		err = deployCmd(os.Args[2:])
-	case "get":
-		err = getCmd(os.Args[2:])
 	case "list":
-		err = listCmd()
+		err = listCmd(cfg)
+	case "destroy":
+		err = destroyCmd(cfg)
+	case "deploy":
+		err = deployCmd(cfg, os.Args[2:])
+	case "get":
+		err = getCmd(cfg, os.Args[2:])
 	case "stop":
-		err = stopCmd(os.Args[2:])
+		err = stopCmd(cfg, os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -50,7 +54,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: zeroku <init|deploy|destroy|list|get> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: zeroku <init|deploy|destroy|list|get|stop> [flags]")
 }
 
 func initCmd(args []string) error {
@@ -94,7 +98,7 @@ func initCmd(args []string) error {
 	return nil
 }
 
-func destroyCmd() error {
+func destroyCmd(cfg config.Config) error {
 	res, err := cli.Load()
 	if errors.Is(err, os.ErrNotExist) {
 		return errors.New("not initialized: run `zeroku init` first")
@@ -114,7 +118,7 @@ func destroyCmd() error {
 	return cli.Remove()
 }
 
-func deployCmd(args []string) error {
+func deployCmd(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 
 	gitRef := fs.String("ref", "main", "Git branch, tag or commit")
@@ -132,8 +136,7 @@ func deployCmd(args []string) error {
 	appName := remaining[0]
 	gitURL := remaining[1]
 
-	url := config.BaseURL()
-	c := client.New(url)
+	c := client.New(cfg.BaseURL(), cfg.Token)
 	if err := c.Deploy(appName, api.DeployRequest{Repo: gitURL, GitRef: *gitRef, ContainerPort: *port}); err != nil {
 		return err
 	}
@@ -141,7 +144,7 @@ func deployCmd(args []string) error {
 	return nil
 }
 
-func getCmd(args []string) error {
+func getCmd(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("get", flag.ContinueOnError)
 
 	appName := fs.String("name", "", "App name")
@@ -154,8 +157,7 @@ func getCmd(args []string) error {
 		return fmt.Errorf("usage: zeroku get [--name <appname>]")
 	}
 
-	url := config.BaseURL()
-	c := client.New(url)
+	c := client.New(cfg.BaseURL(), cfg.Token)
 	app, err := c.GetApp(*appName)
 	if err != nil {
 		return err
@@ -170,9 +172,8 @@ func getCmd(args []string) error {
 	return nil
 }
 
-func listCmd() error {
-	url := config.BaseURL()
-	c := client.New(url)
+func listCmd(cfg config.Config) error {
+	c := client.New(cfg.BaseURL(), cfg.Token)
 	apps, err := c.GetAppSummaryList()
 	if err != nil {
 		return err
@@ -189,7 +190,7 @@ func listCmd() error {
 	return nil
 }
 
-func stopCmd(args []string) error {
+func stopCmd(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
 
 	appName := fs.String("name", "", "App name")
@@ -202,8 +203,7 @@ func stopCmd(args []string) error {
 		return fmt.Errorf("usage: zeroku stop [--name <appname>]")
 	}
 
-	url := config.BaseURL()
-	c := client.New(url)
+	c := client.New(cfg.BaseURL(), cfg.Token)
 	if err := c.Stop(*appName); err != nil {
 		return err
 	}

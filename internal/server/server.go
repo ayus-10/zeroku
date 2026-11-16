@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
@@ -16,40 +15,34 @@ import (
 )
 
 type Server struct {
-	port    int
+	cfg     config.Config
 	store   *state.Store
 	router  Router
 	proxyMu sync.Mutex
 }
 
 func NewServer() *http.Server {
-	port, err := strconv.Atoi(os.Getenv("PORT"))
+	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("invalid port: %v", err)
+		log.Fatalf("failed to load config: %v", err)
 	}
 
-	stateDir := os.Getenv("STATE_DIR")
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		log.Fatalf("failed to create state directory: %v", err)
 	}
 
-	authToken := config.AuthToken()
-	if len(authToken) < 32 {
-		log.Fatalf("AUTH_TOKEN must be at least 32 characters")
-	}
-
-	store, err := state.NewStore(filepath.Join(stateDir, "state.json"), authToken)
+	store, err := state.NewStore(filepath.Join(cfg.StateDir, "state.json"), cfg.Token)
 	if err != nil {
 		log.Fatalf("failed to create store: %v", err)
 	}
 
 	NewServer := &Server{
-		port:  port,
+		cfg:   cfg,
 		store: store,
 	}
 
 	server := &http.Server{
-		Addr:        fmt.Sprintf(":%d", NewServer.port),
+		Addr:        fmt.Sprintf(":%d", NewServer.cfg.Port),
 		Handler:     NewServer.RegisterRoutes(),
 		IdleTimeout: time.Minute,
 		ReadTimeout: 10 * time.Second,
