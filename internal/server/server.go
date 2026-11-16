@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ayus-10/zeroku/internal/config"
@@ -15,8 +16,10 @@ import (
 )
 
 type Server struct {
-	port  int
-	store *state.Store
+	port    int
+	store   *state.Store
+	router  Router
+	proxyMu sync.Mutex
 }
 
 func NewServer() *http.Server {

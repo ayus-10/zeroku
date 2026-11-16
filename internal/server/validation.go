@@ -12,7 +12,6 @@ import (
 )
 
 var (
-	appNamePattern  = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 	repoPathPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$`)
 	gitRefPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 	envKeyPattern   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -26,19 +25,6 @@ const (
 var allowedRepoHosts = map[string]bool{
 	"github.com": true,
 	"gitlab.com": true,
-}
-
-func validateAppName(name string) error {
-	if name == "" {
-		return errors.New("app name is required")
-	}
-	if len(name) > 63 {
-		return fmt.Errorf("app name must be 63 characters or fewer, got %d", len(name))
-	}
-	if !appNamePattern.MatchString(name) {
-		return errors.New("app name may contain letters, digits, and hyphens, but must not start or end with a hyphen")
-	}
-	return nil
 }
 
 func validateRepoURL(raw string) error {

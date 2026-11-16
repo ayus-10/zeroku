@@ -42,15 +42,16 @@ type App struct {
 	NextID        int               `json:"next_id"`
 }
 
-type AppSummary struct {
+type AppSummaryResponse struct {
 	Name          string `json:"name"`
 	Repo          string `json:"repo"`
 	ContainerPort int    `json:"container_port"`
+	HasEnv        bool   `json:"has_env"`
 	CurrentID     int    `json:"current_id"`
 	NextID        int    `json:"next_id"`
 }
 
-type AppDetails struct {
+type AppResponse struct {
 	Name          string    `json:"name"`
 	Repo          string    `json:"repo"`
 	ContainerPort int       `json:"container_port"`
@@ -179,16 +180,28 @@ func (s *Store) SetCurrent(name string, id int) (*Release, error) {
 	return prev, err
 }
 
-func (s *Store) ListApps() []AppSummary {
+func (s *Store) List() []App {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	apps := make([]AppSummary, 0, len(s.data.Apps))
+	apps := make([]App, 0, len(s.data.Apps))
 	for _, app := range s.data.Apps {
-		apps = append(apps, AppSummary{
+		apps = append(apps, *app)
+	}
+	return apps
+}
+
+func (s *Store) GetAppSummaryList() []AppSummaryResponse {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make([]AppSummaryResponse, 0, len(s.data.Apps))
+	for _, app := range s.data.Apps {
+		apps = append(apps, AppSummaryResponse{
 			Name:          app.Name,
 			Repo:          app.Repo,
 			ContainerPort: app.ContainerPort,
+			HasEnv:        len(app.Env) > 0,
 			CurrentID:     app.CurrentID,
 			NextID:        app.NextID,
 		})
@@ -197,7 +210,7 @@ func (s *Store) ListApps() []AppSummary {
 	return apps
 }
 
-func (s *Store) GetApp(name string) *AppDetails {
+func (s *Store) GetApp(name string) *AppResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -205,7 +218,7 @@ func (s *Store) GetApp(name string) *AppDetails {
 	if app == nil {
 		return nil
 	}
-	return &AppDetails{
+	return &AppResponse{
 		Name:          app.Name,
 		Repo:          app.Repo,
 		ContainerPort: app.ContainerPort,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ayus-10/zeroku/internal/api"
+	"github.com/ayus-10/zeroku/internal/app"
 	"github.com/ayus-10/zeroku/internal/deployer"
 	"github.com/ayus-10/zeroku/internal/state"
 )
@@ -103,7 +104,7 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appName := r.PathValue("name")
-	if err := validateAppName(appName); err != nil {
+	if err := app.ValidateRouteName(appName); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -220,7 +221,7 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ListAppsHandler(w http.ResponseWriter, r *http.Request) {
-	apps := s.store.ListApps()
+	apps := s.store.GetAppSummaryList()
 
 	w.Header().Set("Content-Type", "application/json")
 

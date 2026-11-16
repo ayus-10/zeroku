@@ -54,16 +54,16 @@ func (c *Client) Deploy(appName string, req api.DeployRequest) error {
 	return nil
 }
 
-func (c *Client) GetApp(appName string) (*state.AppDetails, error) {
-	var data state.AppDetails
+func (c *Client) GetApp(appName string) (*state.AppResponse, error) {
+	var data state.AppResponse
 	if err := c.doJSON(http.MethodGet, "/v1/apps/"+url.PathEscape(appName), nil, &data); err != nil {
 		return nil, err
 	}
 	return &data, nil
 }
 
-func (c *Client) ListApps() ([]state.AppSummary, error) {
-	var data []state.AppSummary
+func (c *Client) GetAppSummaryList() ([]state.AppSummaryResponse, error) {
+	var data []state.AppSummaryResponse
 	if err := c.doJSON(http.MethodGet, "/v1/apps", nil, &data); err != nil {
 		return nil, err
 	}

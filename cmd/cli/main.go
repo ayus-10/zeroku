@@ -161,7 +161,7 @@ func getCmd(args []string) error {
 		return err
 	}
 
-	s, err := prettyPrintAppDetails(app)
+	s, err := prettyPrintApp(app)
 	if err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func getCmd(args []string) error {
 func listCmd() error {
 	url := config.BaseURL()
 	c := client.New(url)
-	apps, err := c.ListApps()
+	apps, err := c.GetAppSummaryList()
 	if err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func stopCmd(args []string) error {
 	return nil
 }
 
-func prettyPrintAppSummary(app *state.AppSummary) (string, error) {
+func prettyPrintAppSummary(app *state.AppSummaryResponse) (string, error) {
 	b, err := json.MarshalIndent(app, "", "  ")
 	if err != nil {
 		return "", err
@@ -219,7 +219,7 @@ func prettyPrintAppSummary(app *state.AppSummary) (string, error) {
 	return string(b), nil
 }
 
-func prettyPrintAppDetails(app *state.AppDetails) (string, error) {
+func prettyPrintApp(app *state.AppResponse) (string, error) {
 	b, err := json.MarshalIndent(app, "", "  ")
 	if err != nil {
 		return "", err
