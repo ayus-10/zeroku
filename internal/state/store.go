@@ -42,15 +42,16 @@ type App struct {
 	NextID        int               `json:"next_id"`
 }
 
-type AppSummary struct {
+type AppSummaryResponse struct {
 	Name          string `json:"name"`
 	Repo          string `json:"repo"`
 	ContainerPort int    `json:"container_port"`
+	HasEnv        bool   `json:"has_env"`
 	CurrentID     int    `json:"current_id"`
 	NextID        int    `json:"next_id"`
 }
 
-type AppDetails struct {
+type AppResponse struct {
 	Name          string    `json:"name"`
 	Repo          string    `json:"repo"`
 	ContainerPort int       `json:"container_port"`
@@ -61,13 +62,18 @@ type AppDetails struct {
 }
 
 type Data struct {
-	Apps map[string]*App `json:"apps"`
+	Apps      map[string]*App `json:"apps"`
+	AuthToken string          `json:"auth_token"`
 }
 
 type Store struct {
 	mu   sync.Mutex
 	path string
 	data Data
+}
+
+func (s *Store) AuthToken() string {
+	return s.data.AuthToken
 }
 
 func newRelease(appName string, id int, commit string) Release {
@@ -174,16 +180,51 @@ func (s *Store) SetCurrent(name string, id int) (*Release, error) {
 	return prev, err
 }
 
-func (s *Store) ListApps() []AppSummary {
+func (s *Store) ClearCurrent(name string) error {
+	err := s.Update(func(d *Data) error {
+		app, ok := d.Apps[name]
+		if !ok {
+			return fmt.Errorf("app %s not found", name)
+		}
+		app.CurrentID = 0
+		return nil
+	})
+	return err
+}
+
+func (s *Store) Get(name string) (*App, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	apps := make([]AppSummary, 0, len(s.data.Apps))
+	app, ok := s.data.Apps[name]
+	if ok {
+		return app, true
+	}
+	return nil, false
+}
+
+func (s *Store) List() []App {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make([]App, 0, len(s.data.Apps))
 	for _, app := range s.data.Apps {
-		apps = append(apps, AppSummary{
+		apps = append(apps, *app)
+	}
+	return apps
+}
+
+func (s *Store) GetAppSummaryList() []AppSummaryResponse {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make([]AppSummaryResponse, 0, len(s.data.Apps))
+	for _, app := range s.data.Apps {
+		apps = append(apps, AppSummaryResponse{
 			Name:          app.Name,
 			Repo:          app.Repo,
 			ContainerPort: app.ContainerPort,
+			HasEnv:        len(app.Env) > 0,
 			CurrentID:     app.CurrentID,
 			NextID:        app.NextID,
 		})
@@ -192,7 +233,7 @@ func (s *Store) ListApps() []AppSummary {
 	return apps
 }
 
-func (s *Store) GetApp(name string) *AppDetails {
+func (s *Store) GetApp(name string) *AppResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -200,7 +241,7 @@ func (s *Store) GetApp(name string) *AppDetails {
 	if app == nil {
 		return nil
 	}
-	return &AppDetails{
+	return &AppResponse{
 		Name:          app.Name,
 		Repo:          app.Repo,
 		ContainerPort: app.ContainerPort,
@@ -263,8 +304,8 @@ func (s *Store) UsedPorts() map[int]bool {
 	return used
 }
 
-func NewStore(path string) (*Store, error) {
-	s := &Store{path: path}
+func NewStore(path string, authToken string) (*Store, error) {
+	s := &Store{path: path, data: Data{AuthToken: authToken}}
 
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {

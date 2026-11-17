@@ -18,12 +18,14 @@ import (
 
 type Client struct {
 	BaseURL    string
+	AuthToken  string
 	HTTPClient *http.Client
 }
 
-func New(baseURL string) *Client {
+func New(baseURL string, authToken string) *Client {
 	return &Client{
-		BaseURL: baseURL,
+		BaseURL:   baseURL,
+		AuthToken: authToken,
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Minute,
 		},
@@ -53,16 +55,16 @@ func (c *Client) Deploy(appName string, req api.DeployRequest) error {
 	return nil
 }
 
-func (c *Client) GetApp(appName string) (*state.AppDetails, error) {
-	var data state.AppDetails
+func (c *Client) GetApp(appName string) (*state.AppResponse, error) {
+	var data state.AppResponse
 	if err := c.doJSON(http.MethodGet, "/v1/apps/"+url.PathEscape(appName), nil, &data); err != nil {
 		return nil, err
 	}
 	return &data, nil
 }
 
-func (c *Client) ListApps() ([]state.AppSummary, error) {
-	var data []state.AppSummary
+func (c *Client) GetAppSummaryList() ([]state.AppSummaryResponse, error) {
+	var data []state.AppSummaryResponse
 	if err := c.doJSON(http.MethodGet, "/v1/apps", nil, &data); err != nil {
 		return nil, err
 	}
@@ -109,6 +111,7 @@ func (c *Client) do(method, path string, in any, okStatus ...int) (*http.Respons
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Authorization", "Bearer "+c.AuthToken)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,9 +10,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ayus-10/zeroku/internal/api"
+	"github.com/ayus-10/zeroku/internal/app"
 	"github.com/ayus-10/zeroku/internal/deployer"
 	"github.com/ayus-10/zeroku/internal/state"
 )
@@ -24,31 +27,37 @@ type flushWriter struct {
 func (s *Server) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
 
-	// Register routes
 	mux.HandleFunc("POST /v1/apps/{name}/deploy", s.DeployHandler)
 	mux.HandleFunc("POST /v1/apps/{name}/stop", s.StopAppHandler)
 	mux.HandleFunc("GET /v1/apps/{name}", s.GetAppHandler)
 	mux.HandleFunc("GET /v1/apps", s.ListAppsHandler)
 
-	// Wrap the mux with CORS middleware
-	return s.corsMiddleware(mux)
+	return s.corsMiddleware(s.authMiddleware(mux))
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Replace "*" with specific origins if needed
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-CSRF-Token")
-		w.Header().Set("Access-Control-Allow-Credentials", "false") // Set to "true" if credentials are required
+		w.Header().Set("Access-Control-Allow-Credentials", "false")
 
-		// Handle preflight OPTIONS requests
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// Proceed with the next handler
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.store.AuthToken())) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -95,7 +104,7 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appName := r.PathValue("name")
-	if err := validateAppName(appName); err != nil {
+	if err := app.ValidateRouteName(appName); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -157,7 +166,7 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	envFile := fmt.Sprintf("%s/env/%s", os.Getenv("STATE_DIR"), rel.Container)
+	envFile := fmt.Sprintf("%s/env/%s", s.cfg.StateDir, rel.Container)
 	if err := os.MkdirAll(filepath.Dir(envFile), 0o755); err != nil {
 		fail("create env dir", err)
 		return
@@ -187,32 +196,46 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 
 	fw.Printf("===> waiting for health check\n")
 
-	if err := deployer.WaitHealthy(ctx, hostPort, "/", 30*time.Second); err != nil {
+	if err := deployer.WaitHealthy(ctx, hostPort, s.cfg.ServiceURL("/"), 30*time.Second); err != nil {
 		deployer.StreamLogs(ctx, fw, rel.Container, 30)
 		fail("health check", err)
 		return
 	}
+
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
 
 	prev, err := s.store.SetCurrent(appName, rel.ID)
 	if err != nil {
 		fail("set current", err)
 		return
 	}
+
+	fw.Printf("===> updating proxy\n")
+	if err := s.syncProxy(cctx); err != nil {
+		if prev != nil {
+			_, _ = s.store.SetCurrent(appName, prev.ID)
+		} else {
+			_ = s.store.ClearCurrent(appName)
+		}
+		fail("sync proxy", err)
+		return
+	}
+
 	if prev != nil {
 		fw.Printf("===> stopping previous release %d\n", prev.ID)
-		if err := deployer.StopContainer(ctx, fw, prev.Container); err != nil {
+		if err := deployer.StopContainer(cctx, fw, prev.Container); err != nil {
 			fw.Printf("WARN: stop previous container: %v\n", err)
-		}
-		if err := s.store.StopRelease(appName, prev.ID); err != nil {
+		} else if err := s.store.StopRelease(appName, prev.ID); err != nil {
 			fw.Printf("WARN: record stopped release: %v\n", err)
 		}
 	}
 
-	fw.Printf("URL: http://localhost:%d\n", hostPort)
+	fw.Printf("URL: %s\n", s.appURL(appName))
 }
 
 func (s *Server) ListAppsHandler(w http.ResponseWriter, r *http.Request) {
-	apps := s.store.ListApps()
+	apps := s.store.GetAppSummaryList()
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -239,23 +262,33 @@ func (s *Server) GetAppHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) StopAppHandler(w http.ResponseWriter, r *http.Request) {
 	appName := r.PathValue("name")
 
-	fw := newFlushWriter(w)
-	ctx := context.Background()
-
 	rel, err := s.store.CurrentRelease(appName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
+	fw := newFlushWriter(w)
+	ctx := context.Background()
+
 	fw.Printf("===> stopping %s (release %d)\n", appName, rel.ID)
 
 	if err := deployer.StopContainer(ctx, fw, rel.Container); err != nil {
 		fw.Printf("ERROR: stop container: %v\n", err)
+		return
 	}
 
 	if err := s.store.StopRelease(appName, rel.ID); err != nil {
 		fw.Printf("ERROR: stop release: %v\n", err)
+		return
+	}
+
+	fw.Printf("===> updating proxy\n")
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := s.syncProxy(syncCtx); err != nil {
+		fw.Printf("ERROR: sync proxy: %v\n", err)
+		return
 	}
 
 	fw.Printf("===> stopped\n")
