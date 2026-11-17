@@ -180,6 +180,29 @@ func (s *Store) SetCurrent(name string, id int) (*Release, error) {
 	return prev, err
 }
 
+func (s *Store) ClearCurrent(name string) error {
+	err := s.Update(func(d *Data) error {
+		app, ok := d.Apps[name]
+		if !ok {
+			return fmt.Errorf("app %s not found", name)
+		}
+		app.CurrentID = 0
+		return nil
+	})
+	return err
+}
+
+func (s *Store) Get(name string) (*App, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	app, ok := s.data.Apps[name]
+	if ok {
+		return app, true
+	}
+	return nil, false
+}
+
 func (s *Store) List() []App {
 	s.mu.Lock()
 	defer s.mu.Unlock()

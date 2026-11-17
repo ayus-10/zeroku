@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ayus-10/zeroku/internal/state"
 )
@@ -33,4 +34,14 @@ func (s *Server) syncProxy(ctx context.Context) error {
 	s.proxyMu.Lock()
 	defer s.proxyMu.Unlock()
 	return s.router.Sync(ctx, Routes(s.store.List()))
+}
+
+func (s *Server) appURL(name string) string {
+	if s.cfg.Production() {
+		return "https://" + name + "." + s.cfg.BaseDomain
+	}
+	if a, ok := s.store.Get(name); ok {
+		return fmt.Sprintf("http://127.0.0.1:%d", a.ContainerPort)
+	}
+	return ""
 }

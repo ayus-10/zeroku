@@ -202,22 +202,36 @@ func (s *Server) DeployHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
+
 	prev, err := s.store.SetCurrent(appName, rel.ID)
 	if err != nil {
 		fail("set current", err)
 		return
 	}
+
+	fw.Printf("===> updating proxy\n")
+	if err := s.syncProxy(cctx); err != nil {
+		if prev != nil {
+			_, _ = s.store.SetCurrent(appName, prev.ID)
+		} else {
+			_ = s.store.ClearCurrent(appName)
+		}
+		fail("sync proxy", err)
+		return
+	}
+
 	if prev != nil {
 		fw.Printf("===> stopping previous release %d\n", prev.ID)
-		if err := deployer.StopContainer(ctx, fw, prev.Container); err != nil {
+		if err := deployer.StopContainer(cctx, fw, prev.Container); err != nil {
 			fw.Printf("WARN: stop previous container: %v\n", err)
-		}
-		if err := s.store.StopRelease(appName, prev.ID); err != nil {
+		} else if err := s.store.StopRelease(appName, prev.ID); err != nil {
 			fw.Printf("WARN: record stopped release: %v\n", err)
 		}
 	}
 
-	fw.Printf("URL: http://127.0.0.1:%d\n", hostPort)
+	fw.Printf("URL: %s\n", s.appURL(appName))
 }
 
 func (s *Server) ListAppsHandler(w http.ResponseWriter, r *http.Request) {
@@ -248,23 +262,33 @@ func (s *Server) GetAppHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) StopAppHandler(w http.ResponseWriter, r *http.Request) {
 	appName := r.PathValue("name")
 
-	fw := newFlushWriter(w)
-	ctx := context.Background()
-
 	rel, err := s.store.CurrentRelease(appName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
+	fw := newFlushWriter(w)
+	ctx := context.Background()
+
 	fw.Printf("===> stopping %s (release %d)\n", appName, rel.ID)
 
 	if err := deployer.StopContainer(ctx, fw, rel.Container); err != nil {
 		fw.Printf("ERROR: stop container: %v\n", err)
+		return
 	}
 
 	if err := s.store.StopRelease(appName, rel.ID); err != nil {
 		fw.Printf("ERROR: stop release: %v\n", err)
+		return
+	}
+
+	fw.Printf("===> updating proxy\n")
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := s.syncProxy(syncCtx); err != nil {
+		fw.Printf("ERROR: sync proxy: %v\n", err)
+		return
 	}
 
 	fw.Printf("===> stopped\n")
