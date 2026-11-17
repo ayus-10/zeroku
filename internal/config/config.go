@@ -34,6 +34,14 @@ func (c Config) ServiceURL(path string) string {
 	return u.JoinPath(path).String()
 }
 
+func (c Config) Production() bool {
+	return c.Env == "production"
+}
+
+func (c Config) ListenAddr() string {
+	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+}
+
 func LoadConfig() (Config, error) {
 	host := getEnv("HOST", "127.0.0.1")
 

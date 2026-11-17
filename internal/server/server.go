@@ -1,7 +1,7 @@
 package server
 
 import (
-	"fmt"
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ayus-10/zeroku/internal/config"
+	"github.com/ayus-10/zeroku/internal/proxy"
 	"github.com/ayus-10/zeroku/internal/state"
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -19,6 +20,18 @@ type Server struct {
 	store   *state.Store
 	router  Router
 	proxyMu sync.Mutex
+}
+
+func newRouter(cfg config.Config) (Router, error) {
+	if !cfg.Production() {
+		return NoopRouter{}, nil
+	}
+	opts := proxy.Options{
+		BaseDomain:  cfg.BaseDomain,
+		ControlAddr: cfg.Addr,
+		ACMEStaging: cfg.ACMEStaging,
+	}
+	return proxy.NewCaddy(opts), nil
 }
 
 func NewServer() *http.Server {
@@ -36,14 +49,26 @@ func NewServer() *http.Server {
 		log.Fatalf("failed to create store: %v", err)
 	}
 
-	NewServer := &Server{
-		cfg:   cfg,
-		store: store,
+	router, err := newRouter(cfg)
+	if err != nil {
+		log.Fatalf("failed to configure proxy: %v", err)
+	}
+
+	s := &Server{
+		cfg:    cfg,
+		store:  store,
+		router: router,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := router.Ensure(ctx, Routes(store.List())); err != nil {
+		log.Fatalf("failed to start proxy: %v", err)
 	}
 
 	server := &http.Server{
-		Addr:        fmt.Sprintf(":%d", NewServer.cfg.Port),
-		Handler:     NewServer.RegisterRoutes(),
+		Addr:        cfg.ListenAddr(),
+		Handler:     s.RegisterRoutes(),
 		IdleTimeout: time.Minute,
 		ReadTimeout: 10 * time.Second,
 		// no WriteTimeout to allow Streaming responses (builds, logs)

@@ -3,32 +3,28 @@ package server
 import (
 	"context"
 
-	"github.com/ayus-10/zeroku/internal/proxy"
 	"github.com/ayus-10/zeroku/internal/state"
 )
 
 type Router interface {
-	Ensure(ctx context.Context, apps []proxy.App) error
-	Sync(ctx context.Context, apps []proxy.App) error
+	Ensure(ctx context.Context, apps []state.App) error
+	Sync(ctx context.Context, apps []state.App) error
 }
 
 type NoopRouter struct{}
 
-func (NoopRouter) Ensure(ctx context.Context, apps []proxy.App) error {
+func (NoopRouter) Ensure(ctx context.Context, apps []state.App) error {
 	return nil
 }
 
-func (NoopRouter) Sync(ctx context.Context, apps []proxy.App) error {
+func (NoopRouter) Sync(ctx context.Context, apps []state.App) error {
 	return nil
 }
 
-func Routes(apps []state.App) []proxy.App {
-	out := make([]proxy.App, 0, len(apps))
+func Routes(apps []state.App) []state.App {
+	out := make([]state.App, 0, len(apps))
 	for _, a := range apps {
-		out = append(out, proxy.App{
-			Name:          a.Name,
-			ContainerPort: a.ContainerPort,
-		})
+		out = append(out, a)
 	}
 	return out
 }

@@ -11,11 +11,6 @@ import (
 
 const stagingCA = "https://acme-staging-v02.api.letsencrypt.org/directory"
 
-type App struct {
-	Name          string
-	ContainerPort int
-}
-
 type Options struct {
 	BaseDomain  string
 	ControlAddr string
